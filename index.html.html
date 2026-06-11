@@ -1,0 +1,1264 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FAF5EE">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<title>PuliPuli.Studio 記帳</title>
+<style>
+:root{
+  --cream:#FAF5EE;
+  --milk:#F3EAE0;
+  --card:#FFFFFF;
+  --line:#EDE2D4;
+  --brown:#5C4633;
+  --brown-2:#7A6450;
+  --brown-soft:#A08C77;
+  --accent:#C9A176;
+  --accent-deep:#A87E52;
+  --pink:#E9CFC3;
+  --pink-deep:#D3A593;
+  --red:#C25E52;
+  --r-lg:22px;
+  --r-md:16px;
+  --r-sm:12px;
+  --shadow:0 6px 20px rgba(92,70,51,.08);
+  --shadow-sm:0 3px 10px rgba(92,70,51,.07);
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{height:100%}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,"PingFang TC","Heiti TC","Noto Sans TC","Microsoft JhengHei",sans-serif;
+  background:var(--cream);
+  color:var(--brown);
+  font-size:15px;
+  line-height:1.55;
+  letter-spacing:.02em;
+  -webkit-font-smoothing:antialiased;
+  padding-bottom:env(safe-area-inset-bottom);
+}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+input{font:inherit;color:inherit}
+input:focus{outline:2px solid var(--accent);outline-offset:1px}
+button:focus-visible{outline:2px solid var(--accent-deep);outline-offset:2px}
+
+/* ===== 頂部 ===== */
+header.app{
+  position:sticky;top:0;z-index:30;
+  background:rgba(250,245,238,.92);
+  backdrop-filter:blur(10px);
+  padding:calc(10px + env(safe-area-inset-top)) 16px 8px;
+}
+.brand-row{display:flex;align-items:center;justify-content:space-between}
+.brand{display:flex;align-items:baseline;gap:8px}
+.brand h1{font-size:18px;font-weight:800;letter-spacing:.04em}
+.brand .sub{font-size:11px;color:var(--brown-soft)}
+.head-actions{display:flex;align-items:center;gap:10px}
+.sync-dot{width:8px;height:8px;border-radius:50%;background:#CFC4B5;display:inline-block}
+.sync-dot.ok{background:#9DBB8F}
+.sync-dot.busy{background:var(--accent);animation:pulse 1s infinite}
+.sync-dot.err{background:var(--red)}
+@keyframes pulse{50%{opacity:.35}}
+.gear-btn{font-size:18px;width:36px;height:36px;border-radius:50%;background:var(--milk);display:flex;align-items:center;justify-content:center}
+
+/* 快選列 */
+nav.quick{
+  display:flex;gap:6px;margin-top:10px;
+  background:var(--milk);border-radius:999px;padding:4px;
+}
+nav.quick button{
+  flex:1;padding:9px 0;border-radius:999px;font-size:14px;font-weight:600;color:var(--brown-2);
+  transition:background .2s,color .2s;
+}
+nav.quick button.on{background:var(--brown);color:var(--cream);box-shadow:var(--shadow-sm)}
+
+main{padding:14px 16px 120px;max-width:560px;margin:0 auto}
+.page{display:none}
+.page.on{display:block;animation:fadein .25s ease}
+@keyframes fadein{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+
+.card{background:var(--card);border-radius:var(--r-lg);box-shadow:var(--shadow);padding:16px;margin-bottom:14px}
+.card h3{font-size:14px;font-weight:700;color:var(--brown-2);margin-bottom:10px;display:flex;align-items:center;gap:6px}
+
+/* ===== 月曆 ===== */
+.cal-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.cal-head .ttl{font-size:17px;font-weight:800;letter-spacing:.06em}
+.cal-nav{width:38px;height:38px;border-radius:50%;background:var(--milk);font-size:16px;color:var(--brown-2)}
+.cal-week,.cal-grid{display:grid;grid-template-columns:repeat(7,1fr)}
+.cal-week span{text-align:center;font-size:11px;color:var(--brown-soft);padding:4px 0 8px}
+.cal-grid button.day{
+  position:relative;height:48px;border-radius:14px;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+}
+.cal-grid button.day:active{background:var(--milk)}
+.day .num{
+  width:30px;height:30px;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;
+  font-size:14px;font-weight:600;
+  transition:background .15s,color .15s;
+}
+.day.today .num{box-shadow:inset 0 0 0 1.5px var(--accent)}
+.day.sel .num{background:var(--brown);color:var(--cream)}
+.day .dots{display:flex;gap:3px;height:4px}
+.day .dots i{width:4px;height:4px;border-radius:50%}
+.day .dots i.in{background:var(--accent-deep)}
+.day .dots i.ex{background:var(--pink-deep)}
+.day.dim{opacity:.28}
+
+/* 當日收支方框 */
+.day-panel{min-height:120px}
+.day-panel .empty{color:var(--brown-soft);font-size:13px;text-align:center;padding:26px 0}
+.rec-li{
+  display:flex;align-items:center;gap:10px;
+  padding:10px 2px;border-bottom:1px dashed var(--line);
+}
+.rec-li:last-child{border-bottom:none}
+.rec-li .ic{
+  width:34px;height:34px;border-radius:12px;flex:none;
+  display:flex;align-items:center;justify-content:center;font-size:15px;
+}
+.rec-li .ic.in{background:#F0E5D3}
+.rec-li .ic.ex{background:#F4E2DA}
+.rec-li .body{flex:1;min-width:0}
+.rec-li .t1{font-size:14px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rec-li .t2{font-size:11.5px;color:var(--brown-soft);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rec-li .amt{font-weight:800;font-size:14.5px;white-space:nowrap}
+.rec-li .amt.in{color:var(--brown)}
+.rec-li .amt.ex{color:var(--red)}
+.rec-li .del{font-size:15px;padding:6px;opacity:.65}
+
+/* FAB */
+.fab{
+  position:fixed;right:20px;bottom:calc(26px + env(safe-area-inset-bottom));z-index:25;
+  width:58px;height:58px;border-radius:50%;
+  background:var(--brown);color:var(--cream);font-size:28px;font-weight:300;
+  box-shadow:0 10px 24px rgba(92,70,51,.35);
+  display:flex;align-items:center;justify-content:center;
+  transition:transform .15s;
+}
+.fab:active{transform:scale(.92)}
+
+/* ===== 膠囊列 ===== */
+.pill-scroll{display:flex;gap:8px;overflow-x:auto;padding:2px 2px 10px;scrollbar-width:none}
+.pill-scroll::-webkit-scrollbar{display:none}
+.pill{
+  flex:none;padding:8px 16px;border-radius:999px;font-size:13.5px;font-weight:600;
+  background:var(--card);color:var(--brown-2);box-shadow:var(--shadow-sm);
+  transition:background .15s,color .15s;
+}
+.pill.on{background:var(--brown);color:var(--cream)}
+
+/* ===== 總紀錄 ===== */
+.rec-day-h{font-size:12.5px;font-weight:700;color:var(--brown-soft);margin:14px 2px 4px;letter-spacing:.05em}
+.rec-day-h:first-child{margin-top:2px}
+
+/* 底部懸浮總價欄（總紀錄頁） */
+.week-total{
+  position:fixed;left:16px;right:16px;bottom:calc(20px + env(safe-area-inset-bottom));z-index:20;
+  max-width:528px;margin:0 auto;
+  background:var(--card);border-radius:var(--r-lg);box-shadow:0 10px 28px rgba(92,70,51,.18);
+  padding:14px 18px;display:none;align-items:center;justify-content:space-between;
+}
+.week-total.show{display:flex}
+.week-total .lab{font-size:13px;color:var(--brown-soft);font-weight:600}
+.week-total .val{font-size:20px;font-weight:800;color:var(--brown)}
+.week-total .val.neg{color:var(--red)}
+
+/* ===== 報表 ===== */
+.chart-wrap{display:flex;align-items:center;gap:16px;flex-wrap:wrap;justify-content:center}
+.legend{display:flex;flex-direction:column;gap:6px;min-width:140px}
+.legend .lg{display:flex;align-items:center;gap:8px;font-size:13px}
+.legend .lg i{width:10px;height:10px;border-radius:3px;flex:none}
+.legend .lg b{margin-left:auto;font-weight:700}
+.kpi{display:flex;align-items:flex-end;gap:14px;flex-wrap:wrap}
+.kpi .big{font-size:34px;font-weight:800;line-height:1.1}
+.kpi .unit{font-size:13px;color:var(--brown-soft)}
+.kpi-sub{display:flex;gap:18px;margin-top:10px;font-size:12.5px;color:var(--brown-soft)}
+.kpi-sub b{color:var(--brown);font-weight:700}
+.note-mini{font-size:11.5px;color:var(--brown-soft);margin-top:8px}
+.bars{width:100%}
+
+/* ===== Bottom Sheet ===== */
+.sheet-mask{
+  position:fixed;inset:0;background:rgba(70,52,36,.35);z-index:40;
+  opacity:0;pointer-events:none;transition:opacity .25s;
+}
+.sheet-mask.show{opacity:1;pointer-events:auto}
+.sheet{
+  position:fixed;left:0;right:0;bottom:0;z-index:50;
+  background:var(--cream);
+  border-radius:26px 26px 0 0;
+  max-height:88vh;max-width:560px;margin:0 auto;
+  display:flex;flex-direction:column;
+  transform:translateY(105%);transition:transform .3s cubic-bezier(.32,.72,.33,1);
+  box-shadow:0 -8px 40px rgba(92,70,51,.25);
+}
+.sheet.show{transform:none}
+.sheet-grip{width:42px;height:5px;border-radius:99px;background:var(--line);margin:10px auto 4px;flex:none}
+.sheet-head{padding:4px 18px 10px;flex:none}
+.sheet-body{overflow-y:auto;padding:0 18px 16px;-webkit-overflow-scrolling:touch}
+.seg{
+  display:flex;background:var(--milk);border-radius:999px;padding:4px;margin-top:6px;
+}
+.seg button{flex:1;padding:9px 0;border-radius:999px;font-size:14px;font-weight:700;color:var(--brown-2)}
+.seg button.on.in{background:var(--brown);color:var(--cream)}
+.seg button.on.ex{background:var(--pink-deep);color:#fff}
+.sheet-date{text-align:center;font-size:12.5px;color:var(--brown-soft);margin-top:8px}
+
+.blk{margin-top:14px}
+.blk .blk-t{font-size:13px;font-weight:700;color:var(--brown-2);margin-bottom:8px}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{
+  padding:8px 14px;border-radius:14px;font-size:13.5px;font-weight:600;
+  background:var(--card);box-shadow:var(--shadow-sm);color:var(--brown-2);
+  transition:background .15s,color .15s;
+}
+.chip small{font-weight:500;opacity:.7;margin-left:4px;font-size:11px}
+.chip.on{background:var(--brown);color:var(--cream)}
+.chip.on small{opacity:.85}
+.chip.ex-on{background:var(--pink-deep);color:#fff}
+.inline-input{
+  border:1.5px solid var(--line);border-radius:12px;background:var(--card);
+  padding:8px 12px;font-size:14px;width:120px;
+}
+.inline-input.wide{width:100%}
+
+/* 計算機 */
+.calc{margin-top:10px}
+.calc-disp{
+  background:var(--card);border-radius:var(--r-md);box-shadow:var(--shadow-sm);
+  padding:12px 16px;text-align:right;font-size:22px;font-weight:700;letter-spacing:.04em;
+  min-height:52px;word-break:break-all;
+}
+.calc-disp .ph{color:var(--brown-soft);font-size:15px;font-weight:500}
+.calc-keys{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:10px}
+.calc-keys button{
+  padding:13px 0;border-radius:var(--r-md);background:var(--card);box-shadow:var(--shadow-sm);
+  font-size:18px;font-weight:600;
+}
+.calc-keys button:active{background:var(--milk)}
+.calc-keys .op{background:var(--milk);color:var(--accent-deep)}
+.calc-keys .danger{color:var(--red);font-size:15px}
+
+/* 懸浮總價欄（Sheet 內 Sticky Footer） */
+.sheet-foot{
+  flex:none;padding:12px 18px calc(14px + env(safe-area-inset-bottom));
+  background:var(--card);border-radius:22px 22px 0 0;
+  box-shadow:0 -4px 18px rgba(92,70,51,.10);
+  display:flex;align-items:center;gap:14px;
+}
+.sheet-foot .total{flex:1}
+.sheet-foot .total .lab{font-size:11.5px;color:var(--brown-soft)}
+.sheet-foot .total .val{font-size:24px;font-weight:800}
+.sheet-foot .total .val.ex{color:var(--red)}
+.ok-btn{
+  padding:13px 34px;border-radius:999px;background:var(--brown);color:var(--cream);
+  font-size:16px;font-weight:800;letter-spacing:.15em;
+  box-shadow:0 6px 16px rgba(92,70,51,.3);
+}
+.ok-btn:disabled{opacity:.35;box-shadow:none}
+.ok-btn.ex{background:var(--pink-deep)}
+
+/* 後台設定 / 同步設定 */
+.fold-t{
+  display:flex;align-items:center;justify-content:space-between;width:100%;
+  font-size:13px;font-weight:700;color:var(--brown-soft);padding:14px 0 6px;
+}
+.fold-t .arr{transition:transform .2s}
+.fold-t.open .arr{transform:rotate(180deg)}
+.fold-body{display:none;padding-bottom:8px}
+.fold-body.open{display:block}
+.opt-row{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px dashed var(--line);font-size:13.5px}
+.opt-row .nm{flex:1}
+.opt-row .pr{color:var(--brown-soft);font-size:12.5px}
+.opt-row .rm{color:var(--red);padding:4px 8px;font-size:13px}
+.opt-add{display:flex;gap:6px;margin-top:8px}
+.opt-add input{flex:1;min-width:0}
+.opt-add input.price{flex:none;width:84px}
+.mini-btn{
+  padding:8px 14px;border-radius:12px;background:var(--milk);font-size:13px;font-weight:700;color:var(--brown-2);flex:none;
+}
+.mini-btn.solid{background:var(--brown);color:var(--cream)}
+.field{margin-top:12px}
+.field label{display:block;font-size:12.5px;font-weight:700;color:var(--brown-2);margin-bottom:5px}
+.field .row{display:flex;gap:8px}
+.sync-status{
+  margin-top:12px;padding:10px 14px;border-radius:var(--r-md);background:var(--milk);
+  font-size:13px;display:flex;align-items:center;gap:8px;
+}
+.btn-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.toast{
+  position:fixed;left:50%;bottom:calc(110px + env(safe-area-inset-bottom));transform:translateX(-50%) translateY(8px);
+  background:var(--brown);color:var(--cream);font-size:13.5px;font-weight:600;
+  padding:10px 20px;border-radius:999px;z-index:99;opacity:0;pointer-events:none;
+  transition:opacity .25s,transform .25s;white-space:nowrap;box-shadow:var(--shadow);
+}
+.toast.show{opacity:1;transform:translateX(-50%)}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+
+<header class="app">
+  <div class="brand-row">
+    <div class="brand"><h1>PuliPuli.Studio</h1><span class="sub">美甲記帳</span></div>
+    <div class="head-actions">
+      <span class="sync-dot" id="syncDot" title="同步狀態"></span>
+      <button class="gear-btn" id="gearBtn" aria-label="設定">⚙︎</button>
+    </div>
+  </div>
+  <nav class="quick" role="tablist">
+    <button id="navCal" class="on">月曆</button>
+    <button id="navRec">總紀錄</button>
+    <button id="navRep">報表</button>
+  </nav>
+</header>
+
+<main>
+  <!-- 頁面 1：月曆 -->
+  <section class="page on" id="pageCal">
+    <div class="card">
+      <div class="cal-head">
+        <button class="cal-nav" id="calPrev" aria-label="上個月">‹</button>
+        <div class="ttl" id="calTitle"></div>
+        <button class="cal-nav" id="calNext" aria-label="下個月">›</button>
+      </div>
+      <div class="cal-week"><span>日</span><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span></div>
+      <div class="cal-grid" id="calGrid"></div>
+    </div>
+    <div class="card day-panel">
+      <h3 id="dayPanelTitle">當日收支</h3>
+      <div id="dayList"></div>
+    </div>
+  </section>
+
+  <!-- 頁面 2：總紀錄 -->
+  <section class="page" id="pageRec">
+    <div class="pill-scroll" id="weekPills"></div>
+    <div class="card" id="recListCard">
+      <div id="recList"></div>
+    </div>
+  </section>
+
+  <!-- 頁面 3：報表 -->
+  <section class="page" id="pageRep">
+    <div class="pill-scroll" style="justify-content:center">
+      <button class="pill" data-per="day">日報表</button>
+      <button class="pill on" data-per="month">月報表</button>
+      <button class="pill" data-per="year">年報表</button>
+    </div>
+    <div class="card">
+      <h3 id="repPieTitle">收支圓餅圖</h3>
+      <div class="chart-wrap" id="repPie"></div>
+    </div>
+    <div class="card">
+      <h3>客單價分析</h3>
+      <div id="repAvg"></div>
+      <div class="note-mini">客單價＝期間總收入 ÷ 來客數，可追蹤造型款與加價項目是否提升單價。</div>
+    </div>
+    <div class="card">
+      <h3>服務佔比</h3>
+      <div class="chart-wrap" id="repSvc"></div>
+      <div class="note-mini">以基礎服務的營收比例計算，輔助進貨與備料決策。</div>
+    </div>
+    <div class="card">
+      <h3>每月客流量</h3>
+      <div class="bars" id="repBars"></div>
+      <div class="note-mini">每月來客數（收入筆數），輔助規劃活動與優惠檔期。</div>
+    </div>
+  </section>
+</main>
+
+<div class="week-total" id="weekTotal">
+  <span class="lab" id="weekTotalLab">本週合計</span>
+  <span class="val" id="weekTotalVal">$0</span>
+</div>
+
+<button class="fab" id="fabBtn" aria-label="新增紀錄">＋</button>
+
+<!-- 收入支出記帳 Bottom Sheet -->
+<div class="sheet-mask" id="entryMask"></div>
+<div class="sheet" id="entrySheet" role="dialog" aria-label="收入支出記帳">
+  <div class="sheet-grip"></div>
+  <div class="sheet-head">
+    <div class="seg">
+      <button id="segIn" class="on in">收入</button>
+      <button id="segEx">支出</button>
+    </div>
+    <div class="sheet-date" id="entryDate"></div>
+  </div>
+  <div class="sheet-body" id="entryBody"></div>
+  <div class="sheet-foot">
+    <div class="total">
+      <div class="lab" id="footLab">顧客支付金額</div>
+      <div class="val" id="footVal">$0</div>
+    </div>
+    <button class="ok-btn" id="okBtn" disabled>OK</button>
+  </div>
+</div>
+
+<!-- 設定 Bottom Sheet -->
+<div class="sheet-mask" id="setMask"></div>
+<div class="sheet" id="setSheet" role="dialog" aria-label="設定">
+  <div class="sheet-grip"></div>
+  <div class="sheet-head"><h3 style="text-align:center;font-size:15px;font-weight:800">設定</h3></div>
+  <div class="sheet-body" id="setBody"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+<input type="file" id="importFile" accept=".json,application/json" style="display:none">
+
+<script>
+/* ========= 工具 ========= */
+const $=s=>document.querySelector(s);
+const $$=s=>[...document.querySelectorAll(s)];
+const pad=n=>String(n).padStart(2,'0');
+const fmtD=d=>d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());
+const money=n=>{
+  const neg=n<0, a=Math.abs(n);
+  const s=a%1===0?a.toLocaleString('zh-TW'):a.toLocaleString('zh-TW',{maximumFractionDigits:2});
+  return (neg?'-$':'$')+s;
+};
+const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
+const WD=['日','一','二','三','四','五','六'];
+function toast(msg){
+  const t=$('#toast'); t.textContent=msg; t.classList.add('show');
+  clearTimeout(t._tm); t._tm=setTimeout(()=>t.classList.remove('show'),2200);
+}
+
+/* ========= 資料 ========= */
+const LS_REC='pp_records', LS_OPT='pp_options', LS_SYNC='pp_sync';
+const DEFAULT_OPTS={
+  updatedAt:0,
+  base:[
+    {id:'b1',name:'本店純卸甲(不續)',price:200},
+    {id:'b2',name:'他店純卸甲(不續)',price:300},
+    {id:'b3',name:'單色',price:399},
+    {id:'b4',name:'貓眼',price:499},
+    {id:'b5',name:'鏡面',price:599},
+    {id:'b6',name:'手繪款',price:599},
+    {id:'b7',name:'立體造型款',price:599},
+    {id:'b8',name:'當月優惠款',price:399}
+  ],
+  addon:[
+    {id:'a1',name:'延長',price:300},
+    {id:'a2',name:'補甲',price:100},
+    {id:'a3',name:'貼鑽・飾品',price:100}
+  ],
+  removal:[
+    {id:'r1',name:'本店卸甲(續作)',price:100},
+    {id:'r2',name:'他店卸甲(續作)',price:150}
+  ]
+};
+const EXP_CATS={
+  '進貨':['色膠','飾品','甲片','耗材'],
+  '設備':['磨甲機','凝膠燈','工作燈','工作車','吸塵器','手枕'],
+  '工作室營運':['租金','水電費','網路'],
+  '行銷與雜支':['官方帳號月費','小點心','茶水','進修課程費用']
+};
+let records=loadJSON(LS_REC,[]);
+let opts=loadJSON(LS_OPT,null)||JSON.parse(JSON.stringify(DEFAULT_OPTS));
+let syncCfg=loadJSON(LS_SYNC,{token:'',gistId:'',last:0});
+
+function loadJSON(k,fb){try{const v=localStorage.getItem(k);return v?JSON.parse(v):fb}catch(e){return fb}}
+function saveRecords(){localStorage.setItem(LS_REC,JSON.stringify(records))}
+function saveOpts(){opts.updatedAt=Date.now();localStorage.setItem(LS_OPT,JSON.stringify(opts))}
+function saveSync(){localStorage.setItem(LS_SYNC,JSON.stringify(syncCfg))}
+const live=()=>records.filter(r=>!r.deleted);
+
+function addRecord(r){
+  r.id=uid(); r.updatedAt=Date.now();
+  records.push(r); saveRecords(); scheduleSync();
+}
+function delRecord(id){
+  const r=records.find(x=>x.id===id);
+  if(r){r.deleted=true; r.updatedAt=Date.now(); saveRecords(); scheduleSync();}
+}
+
+/* ========= 導覽 ========= */
+const pages={cal:$('#pageCal'),rec:$('#pageRec'),rep:$('#pageRep')};
+const navs={cal:$('#navCal'),rec:$('#navRec'),rep:$('#navRep')};
+let curPage='cal';
+function go(p){
+  curPage=p;
+  for(const k in pages){pages[k].classList.toggle('on',k===p);navs[k].classList.toggle('on',k===p);}
+  $('#fabBtn').style.display = p==='cal'?'flex':'none';
+  $('#weekTotal').classList.toggle('show', p==='rec');
+  if(p==='cal')renderCal();
+  if(p==='rec')renderRec();
+  if(p==='rep')renderRep();
+}
+navs.cal.onclick=()=>go('cal');
+navs.rec.onclick=()=>go('rec');
+navs.rep.onclick=()=>go('rep');
+
+/* ========= 月曆 ========= */
+const today=new Date(); today.setHours(0,0,0,0);
+let calY=today.getFullYear(), calM=today.getMonth();
+let selDate=fmtD(today);
+
+$('#calPrev').onclick=()=>{calM--;if(calM<0){calM=11;calY--;}renderCal();};
+$('#calNext').onclick=()=>{calM++;if(calM>11){calM=0;calY++;}renderCal();};
+
+function renderCal(){
+  $('#calTitle').textContent=calY+'年 '+(calM+1)+'月';
+  const grid=$('#calGrid'); grid.innerHTML='';
+  const first=new Date(calY,calM,1);
+  const days=new Date(calY,calM+1,0).getDate();
+  const dayMap={};
+  live().forEach(r=>{
+    if(!dayMap[r.date])dayMap[r.date]={in:false,ex:false};
+    dayMap[r.date][r.type==='income'?'in':'ex']=true;
+  });
+  for(let i=0;i<first.getDay();i++){const b=document.createElement('button');b.className='day dim';b.disabled=true;grid.appendChild(b);}
+  for(let d=1;d<=days;d++){
+    const ds=calY+'-'+pad(calM+1)+'-'+pad(d);
+    const b=document.createElement('button');
+    b.className='day'+(ds===fmtD(today)?' today':'')+(ds===selDate?' sel':'');
+    const dots=dayMap[ds]||{};
+    b.innerHTML='<span class="num">'+d+'</span><span class="dots">'+(dots.in?'<i class="in"></i>':'')+(dots.ex?'<i class="ex"></i>':'')+'</span>';
+    b.onclick=()=>{selDate=ds;renderCal();};
+    grid.appendChild(b);
+  }
+  renderDayPanel();
+}
+
+function recTitle(r){
+  if(r.type==='income'){
+    const base=r.breakdown&&r.breakdown.base?r.breakdown.base.name:'收入';
+    const extra=(r.breakdown&&r.breakdown.addons&&r.breakdown.addons.length)?'＋'+r.breakdown.addons.length+'項加價':'';
+    return base+extra;
+  }
+  return r.category||'支出';
+}
+function recSub(r){
+  if(r.type==='income'){
+    const parts=[];
+    if(r.breakdown){
+      if(r.breakdown.removal)parts.push(r.breakdown.removal.name);
+      if(r.breakdown.addons)r.breakdown.addons.forEach(a=>parts.push(a.name));
+    }
+    if(r.discount&&r.discount.label)parts.push(r.discount.label);
+    if(r.note)parts.push(r.note);
+    return parts.join('・')||'基礎服務';
+  }
+  const parts=(r.items||[]).slice();
+  if(r.note)parts.push(r.note);
+  return parts.join('・')||'—';
+}
+function recLi(r,showDel){
+  const li=document.createElement('div'); li.className='rec-li';
+  const isIn=r.type==='income';
+  li.innerHTML=
+    '<div class="ic '+(isIn?'in':'ex')+'">'+(isIn?'💅':'🧾')+'</div>'+
+    '<div class="body"><div class="t1">'+esc(recTitle(r))+'</div><div class="t2">'+esc(recSub(r))+'</div></div>'+
+    '<div class="amt '+(isIn?'in':'ex')+'">'+(isIn?'+':'-')+money(r.amount).replace('-','')+'</div>'+
+    (showDel?'<button class="del" aria-label="刪除">🗑️</button>':'');
+  if(showDel)li.querySelector('.del').onclick=()=>{
+    if(confirm('確定刪除這筆紀錄？')){delRecord(r.id);renderCal();}
+  };
+  return li;
+}
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+function renderDayPanel(){
+  const d=new Date(selDate+'T00:00:00');
+  $('#dayPanelTitle').textContent=(d.getMonth()+1)+'/'+d.getDate()+'（'+WD[d.getDay()]+'）收支';
+  const list=$('#dayList'); list.innerHTML='';
+  const rs=live().filter(r=>r.date===selDate).sort((a,b)=>a.updatedAt-b.updatedAt);
+  if(!rs.length){list.innerHTML='<div class="empty">這天還沒有紀錄，點右下角「＋」開始記帳 ☁️</div>';return;}
+  rs.forEach(r=>list.appendChild(recLi(r,true)));
+}
+
+/* ========= 總紀錄 ========= */
+function weekStart(d){const x=new Date(d);x.setHours(0,0,0,0);x.setDate(x.getDate()-x.getDay());return x;}
+let selWeek=weekStart(today).getTime();
+
+function renderRec(){
+  const pills=$('#weekPills'); pills.innerHTML='';
+  const cur=weekStart(today).getTime();
+  let min=cur;
+  live().forEach(r=>{const t=weekStart(new Date(r.date+'T00:00:00')).getTime();if(t<min)min=t;});
+  const weeks=[];
+  for(let t=cur+7*864e5*4; t>=min; t-=7*864e5)weeks.push(t);
+  weeks.sort((a,b)=>a-b);
+  let selBtn=null;
+  weeks.forEach(t=>{
+    const s=new Date(t), e=new Date(t+6*864e5);
+    const b=document.createElement('button');
+    b.className='pill'+(t===selWeek?' on':'');
+    b.textContent=(t===cur?'本週 ':'')+(s.getMonth()+1)+'/'+s.getDate()+'–'+(e.getMonth()+1)+'/'+e.getDate();
+    b.onclick=()=>{selWeek=t;renderRec();};
+    pills.appendChild(b);
+    if(t===selWeek)selBtn=b;
+  });
+  if(selBtn)requestAnimationFrame(()=>selBtn.scrollIntoView({inline:'center',block:'nearest'}));
+
+  const list=$('#recList'); list.innerHTML='';
+  const s=selWeek, e=selWeek+7*864e5;
+  let total=0, any=false, todayHdr=null;
+  for(let t=s;t<e;t+=864e5){
+    const ds=fmtD(new Date(t));
+    const rs=live().filter(r=>r.date===ds).sort((a,b)=>a.updatedAt-b.updatedAt);
+    if(!rs.length)continue;
+    any=true;
+    const d=new Date(t);
+    const h=document.createElement('div'); h.className='rec-day-h';
+    h.textContent=(d.getMonth()+1)+'/'+d.getDate()+'（'+WD[d.getDay()]+'）'+(ds===fmtD(today)?'・今天':'');
+    list.appendChild(h);
+    if(ds===fmtD(today))todayHdr=h;
+    rs.forEach(r=>{
+      total+=r.type==='income'?r.amount:-r.amount;
+      list.appendChild(recLi(r,false));
+    });
+  }
+  if(!any)list.innerHTML='<div class="empty" style="color:var(--brown-soft);font-size:13px;text-align:center;padding:26px 0">這一週沒有任何紀錄</div>';
+  const tv=$('#weekTotalVal');
+  tv.textContent=money(total);
+  tv.classList.toggle('neg',total<0);
+  $('#weekTotalLab').textContent=(selWeek===cur?'本週合計':'當週合計');
+  if(todayHdr)requestAnimationFrame(()=>todayHdr.scrollIntoView({block:'nearest'}));
+}
+
+/* ========= 報表 ========= */
+let repPer='month';
+$$('#pageRep .pill[data-per]').forEach(b=>b.onclick=()=>{
+  repPer=b.dataset.per;
+  $$('#pageRep .pill[data-per]').forEach(x=>x.classList.toggle('on',x===b));
+  renderRep();
+});
+const PIE_COLORS=['#C9A176','#D3A593','#A8B5A0','#B9A6C0','#D9C7A3','#9FB6C3','#C7A3A3','#8FA98F'];
+
+function periodFilter(){
+  const y=today.getFullYear(),m=today.getMonth();
+  if(repPer==='day'){const ds=fmtD(today);return{label:(m+1)+'/'+today.getDate()+' 當日',test:r=>r.date===ds};}
+  if(repPer==='year'){const p=y+'-';return{label:y+'年',test:r=>r.date.startsWith(p)};}
+  const p=y+'-'+pad(m+1);return{label:y+'年'+(m+1)+'月',test:r=>r.date.startsWith(p)};
+}
+
+function pieSVG(data,size){
+  size=size||170;
+  const total=data.reduce((s,d)=>s+d.value,0);
+  if(total<=0)return '<div class="empty" style="color:var(--brown-soft);font-size:13px;padding:18px 0">此期間尚無資料</div>';
+  const cx=size/2,cy=size/2,R=size/2-2,r=R*0.55;
+  let a0=-Math.PI/2, paths='';
+  const nz=data.filter(d=>d.value>0);
+  if(nz.length===1){
+    paths='<circle cx="'+cx+'" cy="'+cy+'" r="'+((R+r)/2)+'" fill="none" stroke="'+nz[0].color+'" stroke-width="'+(R-r)+'"/>';
+  }else{
+    data.forEach(d=>{
+      if(d.value<=0)return;
+      const a1=a0+d.value/total*2*Math.PI;
+      const large=(a1-a0)>Math.PI?1:0;
+      const x0=cx+R*Math.cos(a0),y0=cy+R*Math.sin(a0);
+      const x1=cx+R*Math.cos(a1),y1=cy+R*Math.sin(a1);
+      const x2=cx+r*Math.cos(a1),y2=cy+r*Math.sin(a1);
+      const x3=cx+r*Math.cos(a0),y3=cy+r*Math.sin(a0);
+      paths+='<path d="M'+x0.toFixed(2)+' '+y0.toFixed(2)+
+        ' A'+R+' '+R+' 0 '+large+' 1 '+x1.toFixed(2)+' '+y1.toFixed(2)+
+        ' L'+x2.toFixed(2)+' '+y2.toFixed(2)+
+        ' A'+r+' '+r+' 0 '+large+' 0 '+x3.toFixed(2)+' '+y3.toFixed(2)+
+        ' Z" fill="'+d.color+'"/>';
+      a0=a1;
+    });
+  }
+  return '<svg width="'+size+'" height="'+size+'" viewBox="0 0 '+size+' '+size+'" role="img">'+paths+'</svg>';
+}
+function legendHTML(data,total){
+  return '<div class="legend">'+data.map(d=>{
+    const pct=total>0?Math.round(d.value/total*100):0;
+    return '<div class="lg"><i style="background:'+d.color+'"></i>'+esc(d.label)+'<b>'+money(d.value)+'（'+pct+'%）</b></div>';
+  }).join('')+'</div>';
+}
+
+function renderRep(){
+  const per=periodFilter();
+  const rs=live().filter(per.test);
+  const inSum=rs.filter(r=>r.type==='income').reduce((s,r)=>s+r.amount,0);
+  const exSum=rs.filter(r=>r.type==='expense').reduce((s,r)=>s+r.amount,0);
+
+  /* 收支圓餅 */
+  $('#repPieTitle').textContent=per.label+'・收支圓餅圖';
+  const pieData=[{label:'收入',value:inSum,color:'#C9A176'},{label:'支出',value:exSum,color:'#D3A593'}];
+  $('#repPie').innerHTML=pieSVG(pieData)+( (inSum+exSum)>0 ? legendHTML(pieData,inSum+exSum)+
+    '<div style="width:100%;text-align:center;font-size:13px;color:var(--brown-soft)">淨額 <b style="color:'+(inSum-exSum<0?'var(--red)':'var(--brown)')+';font-size:16px">'+money(inSum-exSum)+'</b></div>' : '');
+
+  /* 客單價 */
+  const visits=rs.filter(r=>r.type==='income').length;
+  const avg=visits?Math.round(inSum/visits):0;
+  $('#repAvg').innerHTML=
+    '<div class="kpi"><span class="big">'+money(avg)+'</span><span class="unit">/ 人（'+esc(per.label)+'）</span></div>'+
+    '<div class="kpi-sub"><span>總收入 <b>'+money(inSum)+'</b></span><span>來客數 <b>'+visits+' 位</b></span></div>';
+
+  /* 服務佔比 */
+  const svcMap={};
+  rs.forEach(r=>{
+    if(r.type!=='income')return;
+    const name=r.breakdown&&r.breakdown.base?r.breakdown.base.name:'其他';
+    svcMap[name]=(svcMap[name]||0)+r.amount;
+  });
+  const svcData=Object.keys(svcMap).map((k,i)=>({label:k,value:svcMap[k],color:PIE_COLORS[i%PIE_COLORS.length]}))
+    .sort((a,b)=>b.value-a.value);
+  const svcTotal=svcData.reduce((s,d)=>s+d.value,0);
+  $('#repSvc').innerHTML=pieSVG(svcData)+(svcTotal>0?legendHTML(svcData,svcTotal):'');
+
+  /* 客流量長條圖（當年每月來客數） */
+  const y=today.getFullYear();
+  const counts=Array(12).fill(0);
+  live().forEach(r=>{
+    if(r.type!=='income')return;
+    if(r.date.slice(0,4)!=String(y))return;
+    counts[parseInt(r.date.slice(5,7),10)-1]++;
+  });
+  const max=Math.max.apply(null,counts.concat([1]));
+  const W=320,H=150,bw=W/12;
+  let bars='';
+  counts.forEach((c,i)=>{
+    const h=c/max*(H-34);
+    const x=i*bw+4, yb=H-22-h;
+    bars+='<rect x="'+x.toFixed(1)+'" y="'+yb.toFixed(1)+'" width="'+(bw-8).toFixed(1)+'" height="'+Math.max(h,1.5).toFixed(1)+'" rx="5" fill="'+(i===today.getMonth()?'#A87E52':'#E2CDB4')+'"/>'+
+      (c>0?'<text x="'+(x+(bw-8)/2).toFixed(1)+'" y="'+(yb-4).toFixed(1)+'" text-anchor="middle" font-size="9" fill="#8A7560">'+c+'</text>':'')+
+      '<text x="'+(x+(bw-8)/2).toFixed(1)+'" y="'+(H-8)+'" text-anchor="middle" font-size="9" fill="#A08C77">'+(i+1)+'月</text>';
+  });
+  $('#repBars').innerHTML='<svg width="100%" viewBox="0 0 '+W+' '+H+'" role="img">'+bars+'</svg>';
+}
+
+/* ========= 記帳 Bottom Sheet ========= */
+let entryMode='income';
+let inSel={base:null,addons:[],extra:'',removal:null,freeRemoval:false,pct:null,fixed:null,custom:'',note:''};
+let exSel={cat:'進貨',items:[],other:'',note:''};
+let calcExpr='';
+
+function openEntry(){
+  entryMode='income';
+  inSel={base:null,addons:[],extra:'',removal:null,freeRemoval:false,pct:null,fixed:null,custom:'',note:''};
+  exSel={cat:'進貨',items:[],other:'',note:''};
+  calcExpr='';
+  const d=new Date(selDate+'T00:00:00');
+  $('#entryDate').textContent='記帳日期：'+d.getFullYear()+'/'+(d.getMonth()+1)+'/'+d.getDate()+'（'+WD[d.getDay()]+'）';
+  renderSeg(); renderEntryBody();
+  $('#entryMask').classList.add('show'); $('#entrySheet').classList.add('show');
+}
+function closeEntry(){$('#entryMask').classList.remove('show');$('#entrySheet').classList.remove('show');}
+$('#fabBtn').onclick=openEntry;
+$('#entryMask').onclick=closeEntry;
+$('#segIn').onclick=()=>{entryMode='income';renderSeg();renderEntryBody();};
+$('#segEx').onclick=()=>{entryMode='expense';renderSeg();renderEntryBody();};
+function renderSeg(){
+  const isIn=entryMode==='income';
+  $('#segIn').className=isIn?'on in':'';
+  $('#segEx').className=isIn?'':'on ex';
+}
+
+function chipBtn(label,price,on,cb,exStyle){
+  const b=document.createElement('button');
+  b.className='chip'+(on?(exStyle?' ex-on':' on'):'');
+  b.innerHTML=esc(label)+(price!=null?'<small>$'+price+'</small>':'');
+  b.onclick=cb;
+  return b;
+}
+function blk(title){
+  const d=document.createElement('div'); d.className='blk';
+  d.innerHTML='<div class="blk-t">'+esc(title)+'</div>';
+  const c=document.createElement('div'); c.className='chips'; d.appendChild(c);
+  return {wrap:d,chips:c};
+}
+
+function incomeTotal(){
+  let sub=0;
+  if(inSel.base)sub+=inSel.base.price;
+  inSel.addons.forEach(a=>sub+=a.price);
+  const ex=parseFloat(inSel.extra);
+  if(!isNaN(ex)&&ex>0)sub+=ex;
+  if(inSel.removal&&!inSel.freeRemoval)sub+=inSel.removal.price;
+  let t=sub;
+  if(inSel.pct)t=t*inSel.pct;
+  if(inSel.fixed)t-=inSel.fixed;
+  const c=parseFloat(inSel.custom);
+  if(!isNaN(c)&&c>0)t-=c;
+  return Math.max(0,Math.round(t));
+}
+function calcTotal(){
+  if(!calcExpr)return 0;
+  const tokens=calcExpr.match(/\d+(?:\.\d+)?|[+\-]/g)||[];
+  let total=0,op='+';
+  tokens.forEach(t=>{
+    if(t==='+'||t==='-'){op=t;return;}
+    const n=parseFloat(t);
+    total=op==='+'?total+n:total-n;
+  });
+  return Math.round(total*100)/100;
+}
+
+function updateFoot(){
+  const lab=$('#footLab'),val=$('#footVal'),ok=$('#okBtn');
+  if(entryMode==='income'){
+    lab.textContent='顧客支付金額';
+    val.textContent=money(incomeTotal());
+    val.classList.remove('ex'); ok.classList.remove('ex');
+    ok.disabled=!inSel.base;
+  }else{
+    lab.textContent='本筆採購總費用';
+    val.textContent=money(calcTotal());
+    val.classList.add('ex'); ok.classList.add('ex');
+    ok.disabled=calcTotal()<=0;
+  }
+}
+
+function renderEntryBody(){
+  const body=$('#entryBody'); body.innerHTML='';
+  if(entryMode==='income')renderIncome(body); else renderExpense(body);
+  updateFoot();
+}
+
+/* ---- 收入頁 ---- */
+function renderIncome(body){
+  /* 基礎服務（單選） */
+  const b1=blk('基礎服務（單選）');
+  opts.base.forEach(o=>{
+    b1.chips.appendChild(chipBtn(o.name,o.price,inSel.base&&inSel.base.id===o.id,()=>{
+      inSel.base=(inSel.base&&inSel.base.id===o.id)?null:o;
+      renderEntryBody();
+    }));
+  });
+  body.appendChild(b1.wrap);
+
+  /* 加價項目（複選） */
+  const b2=blk('加價項目（可複選）');
+  opts.addon.forEach(o=>{
+    const on=inSel.addons.some(a=>a.id===o.id);
+    b2.chips.appendChild(chipBtn(o.name,o.price,on,()=>{
+      if(on)inSel.addons=inSel.addons.filter(a=>a.id!==o.id);
+      else inSel.addons.push(o);
+      renderEntryBody();
+    }));
+  });
+  const xi=document.createElement('input');
+  xi.type='number'; xi.inputMode='numeric'; xi.placeholder='款式加價（599up 補差額）';
+  xi.className='inline-input'; xi.style.width='190px'; xi.value=inSel.extra;
+  xi.oninput=()=>{inSel.extra=xi.value;updateFoot();};
+  b2.chips.appendChild(xi);
+  body.appendChild(b2.wrap);
+
+  /* 卸甲續作（單選） */
+  const b3=blk('卸甲續作（單選）');
+  opts.removal.forEach(o=>{
+    b3.chips.appendChild(chipBtn(o.name,o.price,inSel.removal&&inSel.removal.id===o.id,()=>{
+      inSel.removal=(inSel.removal&&inSel.removal.id===o.id)?null:o;
+      renderEntryBody();
+    }));
+  });
+  body.appendChild(b3.wrap);
+
+  /* 行銷與折扣 */
+  const b4=blk('行銷與折扣');
+  [[0.85,'85折'],[0.9,'9折'],[0.95,'95折']].forEach(([p,l])=>{
+    b4.chips.appendChild(chipBtn(l,null,inSel.pct===p,()=>{
+      inSel.pct=inSel.pct===p?null:p; renderEntryBody();
+    }));
+  });
+  b4.chips.appendChild(chipBtn('新客免費卸甲',null,inSel.freeRemoval,()=>{
+    inSel.freeRemoval=!inSel.freeRemoval; renderEntryBody();
+  }));
+  body.appendChild(b4.wrap);
+  const b5=blk('折扣金額');
+  [10,20,30,40,50,100].forEach(v=>{
+    b5.chips.appendChild(chipBtn('-$'+v,null,inSel.fixed===v,()=>{
+      inSel.fixed=inSel.fixed===v?null:v; renderEntryBody();
+    }));
+  });
+  const ci=document.createElement('input');
+  ci.type='number'; ci.inputMode='numeric'; ci.placeholder='其他折抵金額';
+  ci.className='inline-input'; ci.value=inSel.custom;
+  ci.oninput=()=>{inSel.custom=ci.value;updateFoot();};
+  b5.chips.appendChild(ci);
+  body.appendChild(b5.wrap);
+
+  /* 備註 */
+  const bn=blk('備註（選填）');
+  const ni=document.createElement('input');
+  ni.type='text'; ni.placeholder='例：客人指定款式、預約來源…';
+  ni.className='inline-input wide'; ni.value=inSel.note;
+  ni.oninput=()=>{inSel.note=ni.value;};
+  bn.chips.appendChild(ni);
+  body.appendChild(bn.wrap);
+
+  /* 後台設定區 */
+  body.appendChild(buildOptAdmin());
+}
+
+function buildOptAdmin(){
+  const wrap=document.createElement('div');
+  const t=document.createElement('button');
+  t.className='fold-t';
+  t.innerHTML='<span>⚙︎ 後台設定（新增／移除選項）</span><span class="arr">▾</span>';
+  const bd=document.createElement('div'); bd.className='fold-body';
+  t.onclick=()=>{t.classList.toggle('open');bd.classList.toggle('open');};
+  wrap.appendChild(t); wrap.appendChild(bd);
+
+  [['base','基礎服務'],['addon','加價項目'],['removal','卸甲續作']].forEach(([key,label])=>{
+    const sec=document.createElement('div'); sec.className='blk';
+    sec.innerHTML='<div class="blk-t">'+label+'</div>';
+    opts[key].forEach(o=>{
+      const row=document.createElement('div'); row.className='opt-row';
+      row.innerHTML='<span class="nm">'+esc(o.name)+'</span><span class="pr">$'+o.price+'</span>';
+      const rm=document.createElement('button'); rm.className='rm'; rm.textContent='移除';
+      rm.onclick=()=>{
+        if(!confirm('移除「'+o.name+'」？（不影響既有紀錄）'))return;
+        opts[key]=opts[key].filter(x=>x.id!==o.id);
+        saveOpts(); scheduleSync(); renderEntryBody();
+        toast('已移除選項');
+      };
+      row.appendChild(rm); sec.appendChild(row);
+    });
+    const add=document.createElement('div'); add.className='opt-add';
+    const ni=document.createElement('input'); ni.className='inline-input'; ni.placeholder='新選項名稱';
+    const pi=document.createElement('input'); pi.className='inline-input price'; pi.type='number'; pi.inputMode='numeric'; pi.placeholder='價格';
+    const ab=document.createElement('button'); ab.className='mini-btn solid'; ab.textContent='新增';
+    ab.onclick=()=>{
+      const name=ni.value.trim(), price=parseFloat(pi.value);
+      if(!name||isNaN(price)||price<0){toast('請輸入名稱與價格');return;}
+      opts[key].push({id:uid(),name:name,price:price});
+      saveOpts(); scheduleSync(); renderEntryBody();
+      toast('已新增「'+name+'」');
+    };
+    add.appendChild(ni); add.appendChild(pi); add.appendChild(ab);
+    sec.appendChild(add);
+    bd.appendChild(sec);
+  });
+  return wrap;
+}
+
+/* ---- 支出頁 ---- */
+function renderExpense(body){
+  /* 分類膠囊（橫向滑動） */
+  const sc=document.createElement('div'); sc.className='pill-scroll'; sc.style.marginTop='14px';
+  Object.keys(EXP_CATS).forEach(cat=>{
+    const b=document.createElement('button');
+    b.className='pill'+(exSel.cat===cat?' on':'');
+    b.textContent=cat;
+    b.onclick=()=>{exSel.cat=cat;exSel.items=[];exSel.other='';renderEntryBody();};
+    sc.appendChild(b);
+  });
+  body.appendChild(sc);
+
+  /* 該分類項目 */
+  const b1=blk(exSel.cat+'・項目（可複選）');
+  EXP_CATS[exSel.cat].forEach(name=>{
+    const on=exSel.items.includes(name);
+    b1.chips.appendChild(chipBtn(name,null,on,()=>{
+      if(on)exSel.items=exSel.items.filter(x=>x!==name);
+      else exSel.items.push(name);
+      renderEntryBody();
+    },true));
+  });
+  const oi=document.createElement('input');
+  oi.type='text'; oi.placeholder='其他（自行輸入）'; oi.className='inline-input';
+  oi.value=exSel.other;
+  oi.oninput=()=>{exSel.other=oi.value;};
+  b1.chips.appendChild(oi);
+  body.appendChild(b1.wrap);
+
+  /* 備註 */
+  const bn=blk('備註（選填）');
+  const ni=document.createElement('input');
+  ni.type='text'; ni.placeholder='例：店家、品牌、數量…';
+  ni.className='inline-input wide'; ni.value=exSel.note;
+  ni.oninput=()=>{exSel.note=ni.value;};
+  bn.chips.appendChild(ni);
+  body.appendChild(bn.wrap);
+
+  /* 計算機 */
+  const cw=document.createElement('div'); cw.className='blk';
+  cw.innerHTML='<div class="blk-t">金額（可加減）</div>';
+  const calc=document.createElement('div'); calc.className='calc';
+  const disp=document.createElement('div'); disp.className='calc-disp';
+  const renderDisp=()=>{disp.innerHTML=calcExpr?esc(calcExpr):'<span class="ph">輸入金額，可用＋－累加多筆</span>';updateFoot();};
+  renderDisp();
+  const keys=document.createElement('div'); keys.className='calc-keys';
+  [['7'],['8'],['9'],['＋','op','+'],
+   ['4'],['5'],['6'],['－','op','-'],
+   ['1'],['2'],['3'],['⌫','op','bs'],
+   ['0'],['00'],['.'],['Ｃ','danger','c']
+  ].forEach(([label,cls,act])=>{
+    const k=document.createElement('button');
+    if(cls)k.className=cls;
+    k.textContent=label;
+    k.onclick=()=>{
+      const a=act||label;
+      if(a==='c'){calcExpr='';}
+      else if(a==='bs'){calcExpr=calcExpr.slice(0,-1);}
+      else if(a==='+'||a==='-'){
+        if(!calcExpr)return;
+        const last=calcExpr.slice(-1);
+        if(last==='+'||last==='-')calcExpr=calcExpr.slice(0,-1)+a;
+        else if(last==='.')return;
+        else calcExpr+=a;
+      }else if(a==='.'){
+        const seg=calcExpr.split(/[+\-]/).pop();
+        if(seg.includes('.'))return;
+        calcExpr+=seg===''?'0.':'.';
+      }else{
+        const seg=calcExpr.split(/[+\-]/).pop();
+        if(seg.replace('.','').length>=8)return;
+        calcExpr+=a;
+      }
+      renderDisp();
+    };
+    keys.appendChild(k);
+  });
+  calc.appendChild(disp); calc.appendChild(keys); cw.appendChild(calc);
+  body.appendChild(cw);
+}
+
+/* ---- OK 記錄 ---- */
+$('#okBtn').onclick=()=>{
+  if(entryMode==='income'){
+    if(!inSel.base)return;
+    const items=[inSel.base.name].concat(inSel.addons.map(a=>a.name));
+    if(inSel.removal)items.push(inSel.removal.name);
+    const dParts=[];
+    if(inSel.pct)dParts.push(Math.round(inSel.pct*100)/10+'折');
+    if(inSel.freeRemoval&&inSel.removal)dParts.push('新客免費卸甲');
+    if(inSel.fixed)dParts.push('折$'+inSel.fixed);
+    const c=parseFloat(inSel.custom);
+    if(!isNaN(c)&&c>0)dParts.push('折$'+c);
+    const ex=parseFloat(inSel.extra);
+    addRecord({
+      type:'income', date:selDate, amount:incomeTotal(), items:items,
+      breakdown:{
+        base:{name:inSel.base.name,price:inSel.base.price},
+        addons:inSel.addons.map(a=>({name:a.name,price:a.price}))
+          .concat((!isNaN(ex)&&ex>0)?[{name:'款式加價',price:ex}]:[]),
+        removal:inSel.removal?{name:inSel.removal.name,price:inSel.freeRemoval?0:inSel.removal.price}:null
+      },
+      discount:dParts.length?{label:dParts.join('・'),pct:inSel.pct,fixed:inSel.fixed||0,custom:isNaN(c)?0:c}:null,
+      note:inSel.note.trim()
+    });
+    toast('已記錄收入 '+money(incomeTotal()));
+  }else{
+    const amt=calcTotal();
+    if(amt<=0)return;
+    const items=exSel.items.slice();
+    if(exSel.other.trim())items.push(exSel.other.trim());
+    addRecord({
+      type:'expense', date:selDate, amount:amt,
+      category:exSel.cat, items:items, discount:null, note:exSel.note.trim()
+    });
+    toast('已記錄支出 '+money(amt));
+  }
+  closeEntry();
+  go('cal');
+};
+
+/* ========= 設定 Sheet（同步／備份） ========= */
+$('#gearBtn').onclick=openSettings;
+$('#setMask').onclick=closeSettings;
+function closeSettings(){$('#setMask').classList.remove('show');$('#setSheet').classList.remove('show');}
+
+function openSettings(){
+  const body=$('#setBody'); body.innerHTML='';
+
+  const card=document.createElement('div'); card.className='blk';
+  card.innerHTML='<div class="blk-t">☁️ 雲端同步（GitHub Gist）</div>'+
+    '<div class="note-mini" style="margin:0 0 6px">到 GitHub → Settings → Developer settings → Personal access tokens 建立 classic token，只勾選 <b>gist</b> 權限，貼到下方即可。權杖只儲存在這台裝置的瀏覽器。</div>';
+
+  const f1=document.createElement('div'); f1.className='field';
+  f1.innerHTML='<label>GitHub 權杖（Personal Access Token）</label>';
+  const row=document.createElement('div'); row.className='row';
+  const ti=document.createElement('input');
+  ti.type='password'; ti.className='inline-input wide'; ti.placeholder='ghp_…';
+  ti.value=syncCfg.token; ti.autocomplete='off';
+  const eye=document.createElement('button'); eye.className='mini-btn'; eye.textContent='顯示';
+  eye.onclick=()=>{const show=ti.type==='password';ti.type=show?'text':'password';eye.textContent=show?'隱藏':'顯示';};
+  row.appendChild(ti); row.appendChild(eye); f1.appendChild(row);
+  card.appendChild(f1);
+
+  const st=document.createElement('div'); st.className='sync-status'; st.id='syncStatus';
+  card.appendChild(st);
+
+  const btns=document.createElement('div'); btns.className='btn-row';
+  const bTest=document.createElement('button'); bTest.className='mini-btn'; bTest.textContent='測試連線';
+  const bSync=document.createElement('button'); bSync.className='mini-btn solid'; bSync.textContent='立即同步';
+  const bExp=document.createElement('button'); bExp.className='mini-btn'; bExp.textContent='匯出 JSON 備份';
+  const bImp=document.createElement('button'); bImp.className='mini-btn'; bImp.textContent='匯入 JSON';
+  btns.appendChild(bTest); btns.appendChild(bSync); btns.appendChild(bExp); btns.appendChild(bImp);
+  card.appendChild(btns);
+  body.appendChild(card);
+
+  const saveToken=()=>{
+    const t=ti.value.trim();
+    if(t!==syncCfg.token){syncCfg.token=t; saveSync(); refreshSyncStatus();}
+  };
+  bTest.onclick=async()=>{
+    saveToken();
+    if(!syncCfg.token){toast('請先貼上權杖');return;}
+    setSyncUI('busy','測試連線中…');
+    try{
+      const res=await gh('GET','/gists?per_page=1');
+      if(res.ok){setSyncUI('ok','權杖有效，可以同步 ✅');toast('連線成功');}
+      else setSyncUI('err','權杖無效或權限不足（'+res.status+'）');
+    }catch(e){setSyncUI('err','無法連線到 GitHub');}
+  };
+  bSync.onclick=async()=>{saveToken();await syncNow(true);};
+  ti.onchange=saveToken;
+
+  bExp.onclick=()=>{
+    const data=JSON.stringify({records:records,opts:opts,exportedAt:new Date().toISOString()},null,2);
+    const blob=new Blob([data],{type:'application/json'});
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    a.download='pulipuli-backup-'+fmtD(new Date())+'.json';
+    a.click(); URL.revokeObjectURL(a.href);
+    toast('已匯出備份檔');
+  };
+  bImp.onclick=()=>$('#importFile').click();
+
+  refreshSyncStatus();
+  $('#setMask').classList.add('show'); $('#setSheet').classList.add('show');
+}
+
+$('#importFile').onchange=e=>{
+  const f=e.target.files[0]; if(!f)return;
+  const rd=new FileReader();
+  rd.onload=()=>{
+    try{
+      const data=JSON.parse(rd.result);
+      if(!Array.isArray(data.records))throw 0;
+      records=mergeRecords(records,data.records);
+      if(data.opts&&(data.opts.updatedAt||0)>(opts.updatedAt||0))opts=data.opts;
+      saveRecords(); saveOpts(); scheduleSync();
+      renderCal(); toast('匯入完成，已合併 '+data.records.length+' 筆資料');
+    }catch(err){toast('檔案格式不正確，匯入失敗');}
+  };
+  rd.readAsText(f);
+  e.target.value='';
+};
+
+/* ========= GitHub Gist 同步引擎 ========= */
+const GIST_FILE='pulipuli-data.json';
+let syncTimer=null, syncing=false;
+function scheduleSync(){
+  if(!syncCfg.token)return;
+  clearTimeout(syncTimer);
+  syncTimer=setTimeout(()=>syncNow(false),2000);
+}
+function gh(method,path,bodyObj){
+  return fetch('https://api.github.com'+path,{
+    method:method,
+    headers:{
+      'Authorization':'Bearer '+syncCfg.token,
+      'Accept':'application/vnd.github+json',
+      'Content-Type':'application/json'
+    },
+    body:bodyObj?JSON.stringify(bodyObj):undefined
+  });
+}
+function mergeRecords(a,b){
+  const map={};
+  a.concat(b).forEach(r=>{
+    if(!r||!r.id)return;
+    const old=map[r.id];
+    if(!old||(r.updatedAt||0)>(old.updatedAt||0))map[r.id]=r;
+  });
+  return Object.values(map);
+}
+function setSyncUI(state,msg){
+  const dot=$('#syncDot');
+  dot.className='sync-dot '+(state||'');
+  const st=$('#syncStatus');
+  if(st){
+    const ic=state==='ok'?'🟢':state==='busy'?'🟡':state==='err'?'🔴':'⚪️';
+    st.innerHTML=ic+' '+esc(msg||'');
+  }
+}
+function refreshSyncStatus(){
+  if(!syncCfg.token)setSyncUI('','尚未連線（純單機模式，資料只存在這台裝置）');
+  else if(syncCfg.last)setSyncUI('ok','上次同步：'+new Date(syncCfg.last).toLocaleString('zh-TW',{hour12:false}));
+  else setSyncUI('','已設定權杖，尚未同步');
+}
+async function syncNow(manual){
+  if(!syncCfg.token){if(manual)toast('請先在設定貼上 GitHub 權杖');return;}
+  if(syncing)return;
+  syncing=true;
+  setSyncUI('busy','同步中…');
+  try{
+    let remote=null;
+    /* 下載 */
+    if(syncCfg.gistId){
+      const res=await gh('GET','/gists/'+syncCfg.gistId);
+      if(res.status===404){syncCfg.gistId='';saveSync();}
+      else if(res.ok){
+        const g=await res.json();
+        const f=g.files&&g.files[GIST_FILE];
+        if(f){
+          let content=f.content;
+          if(f.truncated){const raw=await fetch(f.raw_url);content=await raw.text();}
+          try{remote=JSON.parse(content);}catch(e){remote=null;}
+        }
+      }else throw new Error('讀取失敗 '+res.status);
+    }
+    if(!syncCfg.gistId){
+      /* 尋找既有的 Gist（換裝置時自動接回同一份資料） */
+      const ls=await gh('GET','/gists?per_page=100');
+      if(ls.ok){
+        const arr=await ls.json();
+        const hit=arr.find(g=>g.files&&g.files[GIST_FILE]);
+        if(hit){
+          syncCfg.gistId=hit.id; saveSync();
+          const res=await gh('GET','/gists/'+hit.id);
+          if(res.ok){
+            const g=await res.json();
+            const f=g.files[GIST_FILE];
+            let content=f.content;
+            if(f.truncated){const raw=await fetch(f.raw_url);content=await raw.text();}
+            try{remote=JSON.parse(content);}catch(e){remote=null;}
+          }
+        }
+      }else throw new Error('權杖無效（'+ls.status+'）');
+    }
+    /* 合併 */
+    if(remote){
+      records=mergeRecords(records,remote.records||[]);
+      if(remote.opts&&(remote.opts.updatedAt||0)>(opts.updatedAt||0))opts=remote.opts;
+      saveRecords(); localStorage.setItem(LS_OPT,JSON.stringify(opts));
+    }
+    /* 上傳 */
+    const payload=JSON.stringify({records:records,opts:opts,syncedAt:new Date().toISOString()},null,1);
+    if(!syncCfg.gistId){
+      const res=await gh('POST','/gists',{
+        description:'PuliPuli.Studio 記帳資料（自動同步，請勿手動修改）',
+        public:false,
+        files:{[GIST_FILE]:{content:payload}}
+      });
+      if(!res.ok)throw new Error('建立雲端備份失敗 '+res.status);
+      const g=await res.json();
+      syncCfg.gistId=g.id;
+    }else{
+      const res=await gh('PATCH','/gists/'+syncCfg.gistId,{files:{[GIST_FILE]:{content:payload}}});
+      if(!res.ok)throw new Error('上傳失敗 '+res.status);
+    }
+    syncCfg.last=Date.now(); saveSync();
+    setSyncUI('ok','上次同步：'+new Date(syncCfg.last).toLocaleString('zh-TW',{hour12:false}));
+    if(manual)toast('同步完成 ☁️');
+    if(curPage==='cal')renderCal();
+    if(curPage==='rec')renderRec();
+    if(curPage==='rep')renderRep();
+  }catch(e){
+    setSyncUI('err','同步失敗：'+(e.message||'網路或權杖問題'));
+    if(manual)toast('同步失敗，請檢查網路與權杖');
+  }finally{
+    syncing=false;
+  }
+}
+
+/* ========= 啟動 ========= */
+renderCal();
+if(syncCfg.token)syncNow(false);
+else refreshSyncStatus();
+
+</script>
+</body>
+</html>
