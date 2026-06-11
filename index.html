@@ -476,6 +476,12 @@ function delRecord(id){
   const r=records.find(x=>x.id===id);
   if(r){r.deleted=true; r.updatedAt=Date.now(); saveRecords(); scheduleSync();}
 }
+function updateRecord(id,r){
+  const i=records.findIndex(x=>x.id===id);
+  if(i<0)return;
+  r.id=id; r.updatedAt=Date.now();
+  records[i]=r; saveRecords(); scheduleSync();
+}
 
 /* ========= 導覽 ========= */
 const pages={cal:$('#pageCal'),rec:$('#pageRec'),rep:$('#pageRep')};
@@ -556,7 +562,10 @@ function recLi(r,showDel){
     '<div class="body"><div class="t1">'+esc(recTitle(r))+'</div><div class="t2">'+esc(recSub(r))+'</div></div>'+
     '<div class="amt '+(isIn?'in':'ex')+'">'+(isIn?'+':'-')+money(r.amount).replace('-','')+'</div>'+
     (showDel?'<button class="del" aria-label="刪除">🗑️</button>':'');
-  if(showDel)li.querySelector('.del').onclick=()=>{
+  li.style.cursor='pointer';
+  li.onclick=()=>openEntry(r);
+  if(showDel)li.querySelector('.del').onclick=(e)=>{
+    e.stopPropagation();
     if(confirm('確定刪除這筆紀錄？')){delRecord(r.id);renderCal();}
   };
   return li;
@@ -570,6 +579,10 @@ function renderDayPanel(){
   const rs=live().filter(r=>r.date===selDate).sort((a,b)=>a.updatedAt-b.updatedAt);
   if(!rs.length){list.innerHTML='<div class="empty">這天還沒有紀錄，點右下角「＋」開始記帳 ☁️</div>';return;}
   rs.forEach(r=>list.appendChild(recLi(r,true)));
+  const hint=document.createElement('div');
+  hint.style.cssText='font-size:11px;color:var(--brown-soft);text-align:center;padding-top:6px';
+  hint.textContent='點一下紀錄即可修改 ✏️';
+  list.appendChild(hint);
 }
 
 /* ========= 總紀錄 ========= */
@@ -730,19 +743,63 @@ let entryMode='income';
 let inSel={base:null,addons:[],extra:'',removal:null,freeRemoval:false,pct:null,fixed:null,custom:'',note:''};
 let exSel={cat:'進貨',items:[],other:'',note:''};
 let calcExpr='';
+let editingId=null;   /* 正在編輯的紀錄 id；null 表示新增 */
+let editDate=null;    /* 本次表單對應的日期（編輯時沿用原紀錄日期） */
 
-function openEntry(){
-  entryMode='income';
-  inSel={base:null,addons:[],extra:'',removal:null,freeRemoval:false,pct:null,fixed:null,custom:'',note:''};
-  exSel={cat:'進貨',items:[],other:'',note:''};
-  calcExpr='';
-  const d=new Date(selDate+'T00:00:00');
-  $('#entryDate').textContent='記帳日期：'+d.getFullYear()+'/'+(d.getMonth()+1)+'/'+d.getDate()+'（'+WD[d.getDay()]+'）';
+function openEntry(rec){
+  editingId=rec?rec.id:null;
+  editDate=rec?rec.date:selDate;
+  if(rec){
+    entryMode=rec.type;
+    if(rec.type==='income')prefillIncome(rec); else prefillExpense(rec);
+  }else{
+    entryMode='income';
+    inSel={base:null,addons:[],extra:'',removal:null,freeRemoval:false,pct:null,fixed:null,custom:'',note:''};
+    exSel={cat:'進貨',items:[],other:'',note:''};
+    calcExpr='';
+  }
+  const d=new Date(editDate+'T00:00:00');
+  $('#entryDate').textContent=(editingId?'✏️ 編輯紀錄：':'記帳日期：')+d.getFullYear()+'/'+(d.getMonth()+1)+'/'+d.getDate()+'（'+WD[d.getDay()]+'）';
   renderSeg(); renderEntryBody();
   $('#entryMask').classList.add('show'); $('#entrySheet').classList.add('show');
 }
-function closeEntry(){$('#entryMask').classList.remove('show');$('#entrySheet').classList.remove('show');}
-$('#fabBtn').onclick=openEntry;
+
+/* 把既有收入紀錄還原成表單狀態 */
+function prefillIncome(r){
+  const bd=r.breakdown||{};
+  const findBy=(arr,it)=>arr.find(o=>o.name===it.name&&o.price===it.price)||arr.find(o=>o.name===it.name);
+  inSel={base:null,addons:[],extra:'',removal:null,freeRemoval:false,pct:null,fixed:null,custom:'',note:r.note||''};
+  exSel={cat:'進貨',items:[],other:'',note:''};
+  calcExpr='';
+  if(bd.base)inSel.base=findBy(opts.base,bd.base)||{id:'x_'+uid(),name:bd.base.name,price:bd.base.price};
+  (bd.addons||[]).forEach(a=>{
+    if(a.name==='款式加價'){inSel.extra=String(a.price);return;}
+    inSel.addons.push(findBy(opts.addon,a)||{id:'x_'+uid(),name:a.name,price:a.price});
+  });
+  if(bd.removal){
+    const m=findBy(opts.removal,bd.removal);
+    inSel.removal=m||{id:'x_'+uid(),name:bd.removal.name,price:bd.removal.price};
+  }
+  if(r.discount){
+    if(r.discount.pct)inSel.pct=r.discount.pct;
+    if(r.discount.fixed)inSel.fixed=r.discount.fixed;
+    if(r.discount.custom)inSel.custom=String(r.discount.custom);
+    if(/新客免費卸甲/.test(r.discount.label||''))inSel.freeRemoval=true;
+  }
+}
+
+/* 把既有支出紀錄還原成表單狀態 */
+function prefillExpense(r){
+  const cat=EXP_CATS[r.category]?r.category:Object.keys(EXP_CATS)[0];
+  const known=EXP_CATS[cat]||[];
+  const items=[],others=[];
+  (r.items||[]).forEach(n=>known.includes(n)?items.push(n):others.push(n));
+  inSel={base:null,addons:[],extra:'',removal:null,freeRemoval:false,pct:null,fixed:null,custom:'',note:''};
+  exSel={cat:cat,items:items,other:others.join('、'),note:r.note||''};
+  calcExpr=String(r.amount);
+}
+function closeEntry(){$('#entryMask').classList.remove('show');$('#entrySheet').classList.remove('show');editingId=null;}
+$('#fabBtn').onclick=()=>openEntry();
 $('#entryMask').onclick=closeEntry;
 $('#segIn').onclick=()=>{entryMode='income';renderSeg();renderEntryBody();};
 $('#segEx').onclick=()=>{entryMode='expense';renderSeg();renderEntryBody();};
@@ -823,6 +880,11 @@ function renderIncome(body){
       renderEntryBody();
     }));
   });
+  if(inSel.base&&!opts.base.some(o=>o.id===inSel.base.id)){
+    b1.chips.appendChild(chipBtn(inSel.base.name+'（已停用）',inSel.base.price,true,()=>{
+      inSel.base=null; renderEntryBody();
+    }));
+  }
   body.appendChild(b1.wrap);
 
   /* 加價項目（複選） */
@@ -833,6 +895,11 @@ function renderIncome(body){
       if(on)inSel.addons=inSel.addons.filter(a=>a.id!==o.id);
       else inSel.addons.push(o);
       renderEntryBody();
+    }));
+  });
+  inSel.addons.filter(a=>!opts.addon.some(o=>o.id===a.id)).forEach(a=>{
+    b2.chips.appendChild(chipBtn(a.name+'（已停用）',a.price,true,()=>{
+      inSel.addons=inSel.addons.filter(x=>x.id!==a.id); renderEntryBody();
     }));
   });
   const xi=document.createElement('input');
@@ -850,6 +917,11 @@ function renderIncome(body){
       renderEntryBody();
     }));
   });
+  if(inSel.removal&&!opts.removal.some(o=>o.id===inSel.removal.id)){
+    b3.chips.appendChild(chipBtn(inSel.removal.name+'（已停用）',inSel.removal.price,true,()=>{
+      inSel.removal=null; inSel.freeRemoval=false; renderEntryBody();
+    }));
+  }
   body.appendChild(b3.wrap);
 
   /* 行銷與折扣 */
@@ -1015,6 +1087,8 @@ function renderExpense(body){
 
 /* ---- OK 記錄 ---- */
 $('#okBtn').onclick=()=>{
+  const wasEditing=editingId;
+  const save=rec=>{ if(wasEditing)updateRecord(wasEditing,rec); else addRecord(rec); };
   if(entryMode==='income'){
     if(!inSel.base)return;
     const items=[inSel.base.name].concat(inSel.addons.map(a=>a.name));
@@ -1026,8 +1100,8 @@ $('#okBtn').onclick=()=>{
     const c=parseFloat(inSel.custom);
     if(!isNaN(c)&&c>0)dParts.push('折$'+c);
     const ex=parseFloat(inSel.extra);
-    addRecord({
-      type:'income', date:selDate, amount:incomeTotal(), items:items,
+    save({
+      type:'income', date:editDate, amount:incomeTotal(), items:items,
       breakdown:{
         base:{name:inSel.base.name,price:inSel.base.price},
         addons:inSel.addons.map(a=>({name:a.name,price:a.price}))
@@ -1037,20 +1111,20 @@ $('#okBtn').onclick=()=>{
       discount:dParts.length?{label:dParts.join('・'),pct:inSel.pct,fixed:inSel.fixed||0,custom:isNaN(c)?0:c}:null,
       note:inSel.note.trim()
     });
-    toast('已記錄收入 '+money(incomeTotal()));
+    toast(wasEditing?'已更新紀錄 '+money(incomeTotal()):'已記錄收入 '+money(incomeTotal()));
   }else{
     const amt=calcTotal();
     if(amt<=0)return;
     const items=exSel.items.slice();
     if(exSel.other.trim())items.push(exSel.other.trim());
-    addRecord({
-      type:'expense', date:selDate, amount:amt,
+    save({
+      type:'expense', date:editDate, amount:amt,
       category:exSel.cat, items:items, discount:null, note:exSel.note.trim()
     });
-    toast('已記錄支出 '+money(amt));
+    toast(wasEditing?'已更新紀錄 '+money(amt):'已記錄支出 '+money(amt));
   }
   closeEntry();
-  go('cal');
+  if(wasEditing)go(curPage); else go('cal');
 };
 
 /* ========= 設定 Sheet（同步／備份） ========= */
