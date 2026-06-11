@@ -47,7 +47,7 @@ button:focus-visible{outline:2px solid var(--accent-deep);outline-offset:2px}
 /* ===== 頂部 ===== */
 header.app{
   position:sticky;top:0;z-index:30;
-  background:rgba(250,245,238,.92);
+  background:var(--header-bg,rgba(250,245,238,.92));
   backdrop-filter:blur(10px);
   padding:calc(10px + env(safe-area-inset-top)) 16px 8px;
 }
@@ -105,6 +105,7 @@ main{padding:14px 16px 120px;max-width:560px;margin:0 auto}
 .day .dots i{width:4px;height:4px;border-radius:50%}
 .day .dots i.in{background:var(--accent-deep)}
 .day .dots i.ex{background:var(--pink-deep)}
+.day .dots i.bk{background:#9DBB8F}
 .day.dim{opacity:.28}
 
 /* 當日收支方框 */
@@ -205,6 +206,13 @@ main{padding:14px 16px 120px;max-width:560px;margin:0 auto}
 .seg button{flex:1;padding:9px 0;border-radius:999px;font-size:14px;font-weight:700;color:var(--brown-2)}
 .seg button.on.in{background:var(--brown);color:var(--cream)}
 .seg button.on.ex{background:var(--pink-deep);color:#fff}
+.seg button.on.bk{background:#8FAE81;color:#fff}
+.rec-li .ic.bk{background:#EAF1E6}
+.rec-li .amt.bk{color:#7E9A70;font-size:12px;font-weight:700}
+.checkout-btn{
+  padding:7px 12px;border-radius:999px;background:#8FAE81;color:#fff;
+  font-size:12px;font-weight:700;white-space:nowrap;box-shadow:var(--shadow-sm);
+}
 .sheet-date{text-align:center;font-size:12.5px;color:var(--brown-soft);margin-top:8px}
 
 .blk{margin-top:14px}
@@ -300,6 +308,7 @@ main{padding:14px 16px 120px;max-width:560px;margin:0 auto}
 </style>
 </head>
 <body>
+<div id="bgLayer" style="position:fixed;inset:0;z-index:-1;background-size:cover;background-position:center;pointer-events:none"></div>
 
 <header class="app">
   <div class="brand-row">
@@ -319,6 +328,7 @@ main{padding:14px 16px 120px;max-width:560px;margin:0 auto}
 <main>
   <!-- 頁面 1：月曆 -->
   <section class="page on" id="pageCal">
+    <div id="bkNotice"></div>
     <div class="card">
       <div class="cal-head">
         <button class="cal-nav" id="calPrev" aria-label="上個月">‹</button>
@@ -332,6 +342,7 @@ main{padding:14px 16px 120px;max-width:560px;margin:0 auto}
       <h3 id="dayPanelTitle">當日收支</h3>
       <div id="dayList"></div>
     </div>
+    <button class="ok-btn" id="schedBtn" style="width:100%;margin-top:2px">🖼️ 產生本月 IG 預約表</button>
   </section>
 
   <!-- 頁面 2：總紀錄 -->
@@ -368,6 +379,12 @@ main{padding:14px 16px 120px;max-width:560px;margin:0 auto}
       <div class="bars" id="repBars"></div>
       <div class="note-mini">每月來客數（收入筆數），輔助規劃活動與優惠檔期。</div>
     </div>
+    <div class="card">
+      <h3>💖 常客排行（累積）</h3>
+      <div id="repVip"></div>
+      <div class="note-mini">從預約結帳的客人自動統計，看看誰是你的鐵粉。</div>
+    </div>
+    <button class="ok-btn" id="repExport" style="width:100%;margin-top:4px">🖼️ 把這頁報表匯出成圖片</button>
   </section>
 </main>
 
@@ -386,6 +403,7 @@ main{padding:14px 16px 120px;max-width:560px;margin:0 auto}
     <div class="seg">
       <button id="segIn" class="on in">收入</button>
       <button id="segEx">支出</button>
+      <button id="segBk">預約</button>
     </div>
     <div class="sheet-date" id="entryDate"></div>
   </div>
@@ -409,6 +427,8 @@ main{padding:14px 16px 120px;max-width:560px;margin:0 auto}
 
 <div class="toast" id="toast"></div>
 <input type="file" id="importFile" accept=".json,application/json" style="display:none">
+<input type="file" id="bgFile" accept="image/*" style="display:none">
+<input type="file" id="schedBgFile" accept="image/*" style="display:none">
 
 <script>
 /* ========= 工具 ========= */
@@ -450,8 +470,19 @@ const DEFAULT_OPTS={
   removal:[
     {id:'r1',name:'本店卸甲(續作)',price:100},
     {id:'r2',name:'他店卸甲(續作)',price:150}
-  ]
+  ],
+  sched:{
+    slots:['11:00','15:00','19:00'],
+    days:{},
+    footer:'簡易款式$599，卸甲$100，手繪來圖報價。\n*暫不接延甲\n*不接病甲/傷甲\n*不開放攜伴\n*內有狗狗&倉鼠，害怕動物者請斟酌'
+  }
 };
+function ensureSched(){
+  if(!opts.sched)opts.sched=JSON.parse(JSON.stringify(DEFAULT_OPTS.sched));
+  if(!opts.sched.slots)opts.sched.slots=['11:00','15:00','19:00'];
+  if(!opts.sched.days)opts.sched.days={};
+  if(opts.sched.footer==null)opts.sched.footer=DEFAULT_OPTS.sched.footer;
+}
 const EXP_CATS={
   '進貨':['色膠','飾品','甲片','耗材'],
   '設備':['磨甲機','凝膠燈','工作燈','工作車','吸塵器','手枕'],
@@ -461,12 +492,42 @@ const EXP_CATS={
 let records=loadJSON(LS_REC,[]);
 let opts=loadJSON(LS_OPT,null)||JSON.parse(JSON.stringify(DEFAULT_OPTS));
 let syncCfg=loadJSON(LS_SYNC,{token:'',gistId:'',last:0});
+ensureSched();
 
 function loadJSON(k,fb){try{const v=localStorage.getItem(k);return v?JSON.parse(v):fb}catch(e){return fb}}
 function saveRecords(){localStorage.setItem(LS_REC,JSON.stringify(records))}
 function saveOpts(){opts.updatedAt=Date.now();localStorage.setItem(LS_OPT,JSON.stringify(opts))}
 function saveSync(){localStorage.setItem(LS_SYNC,JSON.stringify(syncCfg))}
 const live=()=>records.filter(r=>!r.deleted);
+
+/* ========= 外觀主題（只存在這台裝置，不會雲端同步） ========= */
+const LS_THEME='pp_theme';
+const THEME_DEFAULT_COLOR='#FAF5EE';
+const THEME_PRESETS=[
+  ['#FAF5EE','奶油白（預設）'],
+  ['#FBEFF0','櫻花粉'],
+  ['#EFF5EC','抹茶綠'],
+  ['#EEF4F8','天空藍'],
+  ['#F4EFF8','薰衣草'],
+  ['#FFF6E3','蜂蜜黃']
+];
+let theme=loadJSON(LS_THEME,{color:THEME_DEFAULT_COLOR,image:''});
+function saveTheme(){try{localStorage.setItem(LS_THEME,JSON.stringify(theme))}catch(e){toast('圖片太大，無法儲存，請換一張小一點的')}}
+function hexToRgba(hex,a){
+  const m=/^#?([0-9a-f]{6})$/i.exec(hex||'');
+  if(!m)return 'rgba(250,245,238,'+a+')';
+  const n=parseInt(m[1],16);
+  return 'rgba('+((n>>16)&255)+','+((n>>8)&255)+','+(n&255)+','+a+')';
+}
+function applyTheme(){
+  const c=theme.color||THEME_DEFAULT_COLOR;
+  document.documentElement.style.setProperty('--cream',c);
+  document.documentElement.style.setProperty('--header-bg',hexToRgba(c,.9));
+  const mt=document.querySelector('meta[name=theme-color]');
+  if(mt)mt.setAttribute('content',c);
+  const bg=document.getElementById('bgLayer');
+  if(bg)bg.style.backgroundImage=theme.image?'url('+theme.image+')':'none';
+}
 
 function addRecord(r){
   r.id=uid(); r.updatedAt=Date.now();
@@ -515,8 +576,8 @@ function renderCal(){
   const days=new Date(calY,calM+1,0).getDate();
   const dayMap={};
   live().forEach(r=>{
-    if(!dayMap[r.date])dayMap[r.date]={in:false,ex:false};
-    dayMap[r.date][r.type==='income'?'in':'ex']=true;
+    if(!dayMap[r.date])dayMap[r.date]={in:false,ex:false,bk:false};
+    dayMap[r.date][r.type==='income'?'in':r.type==='expense'?'ex':'bk']=true;
   });
   for(let i=0;i<first.getDay();i++){const b=document.createElement('button');b.className='day dim';b.disabled=true;grid.appendChild(b);}
   for(let d=1;d<=days;d++){
@@ -524,14 +585,38 @@ function renderCal(){
     const b=document.createElement('button');
     b.className='day'+(ds===fmtD(today)?' today':'')+(ds===selDate?' sel':'');
     const dots=dayMap[ds]||{};
-    b.innerHTML='<span class="num">'+d+'</span><span class="dots">'+(dots.in?'<i class="in"></i>':'')+(dots.ex?'<i class="ex"></i>':'')+'</span>';
+    b.innerHTML='<span class="num">'+d+'</span><span class="dots">'+(dots.in?'<i class="in"></i>':'')+(dots.ex?'<i class="ex"></i>':'')+(dots.bk?'<i class="bk"></i>':'')+'</span>';
     b.onclick=()=>{selDate=ds;renderCal();};
     grid.appendChild(b);
   }
   renderDayPanel();
+  renderBkNotice();
+}
+
+/* ===== 今日／明日預約提醒 ===== */
+function renderBkNotice(){
+  const box=$('#bkNotice'); if(!box)return;
+  box.innerHTML='';
+  const days=[[fmtD(today),'今天'],[fmtD(new Date(today.getTime()+864e5)),'明天']];
+  days.forEach(([ds,label])=>{
+    const bks=live().filter(r=>r.type==='booking'&&r.date===ds)
+      .sort((a,b)=>(a.time||'99').localeCompare(b.time||'99'));
+    if(!bks.length)return;
+    const div=document.createElement('div');
+    div.style.cssText='background:#EAF1E6;border:1px solid #CBDCC1;border-radius:var(--r-md);padding:10px 14px;margin-bottom:10px;font-size:13px;color:#5C6E51;box-shadow:var(--shadow-sm);cursor:pointer';
+    div.innerHTML='<b>📅 '+label+' '+bks.length+' 位預約</b>　'+
+      bks.map(b=>esc((b.time?b.time+' ':'')+b.name)).join('、');
+    div.onclick=()=>{
+      const d=new Date(ds+'T00:00:00');
+      selDate=ds; calY=d.getFullYear(); calM=d.getMonth();
+      renderCal();
+    };
+    box.appendChild(div);
+  });
 }
 
 function recTitle(r){
+  if(r.type==='booking')return (r.time?r.time+'　':'')+r.name;
   if(r.type==='income'){
     const base=r.breakdown&&r.breakdown.base?r.breakdown.base.name:'收入';
     const extra=(r.breakdown&&r.breakdown.addons&&r.breakdown.addons.length)?'＋'+r.breakdown.addons.length+'項加價':'';
@@ -540,6 +625,14 @@ function recTitle(r){
   return r.category||'支出';
 }
 function recSub(r){
+  if(r.type==='booking'){
+    const parts=[];
+    if(r.channel)parts.push(r.channel+'預約');
+    if(r.plan)parts.push(r.plan.name);
+    if(r.planNote)parts.push(r.planNote);
+    if(r.deposit>0)parts.push('訂金$'+r.deposit);
+    return parts.join('・')||'待結帳';
+  }
   if(r.type==='income'){
     const parts=[];
     if(r.breakdown){
@@ -556,17 +649,24 @@ function recSub(r){
 }
 function recLi(r,showDel){
   const li=document.createElement('div'); li.className='rec-li';
+  const isBk=r.type==='booking';
   const isIn=r.type==='income';
   li.innerHTML=
-    '<div class="ic '+(isIn?'in':'ex')+'">'+(isIn?'💅':'🧾')+'</div>'+
+    '<div class="ic '+(isBk?'bk':isIn?'in':'ex')+'">'+(isBk?'📅':isIn?'💅':'🧾')+'</div>'+
     '<div class="body"><div class="t1">'+esc(recTitle(r))+'</div><div class="t2">'+esc(recSub(r))+'</div></div>'+
-    '<div class="amt '+(isIn?'in':'ex')+'">'+(isIn?'+':'-')+money(r.amount).replace('-','')+'</div>'+
+    (isBk
+      ?'<button class="checkout-btn">結帳</button>'
+      :'<div class="amt '+(isIn?'in':'ex')+'">'+(isIn?'+':'-')+money(r.amount).replace('-','')+'</div>')+
     (showDel?'<button class="del" aria-label="刪除">🗑️</button>':'');
   li.style.cursor='pointer';
   li.onclick=()=>openEntry(r);
+  if(isBk)li.querySelector('.checkout-btn').onclick=(e)=>{
+    e.stopPropagation();
+    openCheckout(r);
+  };
   if(showDel)li.querySelector('.del').onclick=(e)=>{
     e.stopPropagation();
-    if(confirm('確定刪除這筆紀錄？')){delRecord(r.id);renderCal();}
+    if(confirm(isBk?'確定刪除這筆預約？':'確定刪除這筆紀錄？')){delRecord(r.id);renderCal();}
   };
   return li;
 }
@@ -576,8 +676,78 @@ function renderDayPanel(){
   const d=new Date(selDate+'T00:00:00');
   $('#dayPanelTitle').textContent=(d.getMonth()+1)+'/'+d.getDate()+'（'+WD[d.getDay()]+'）收支';
   const list=$('#dayList'); list.innerHTML='';
-  const rs=live().filter(r=>r.date===selDate).sort((a,b)=>a.updatedAt-b.updatedAt);
-  if(!rs.length){list.innerHTML='<div class="empty">這天還沒有紀錄，點右下角「＋」開始記帳 ☁️</div>';return;}
+
+  /* ---- 時段／公休設定列 ---- */
+  const bar=document.createElement('div');
+  bar.style.cssText='display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px';
+  const off=isOffDay(selDate);
+  const offBtn=document.createElement('button');
+  offBtn.className='mini-btn'+(off?' solid':'');
+  offBtn.textContent=off?'💤 本日公休中（點我恢復）':'💤 設為公休';
+  offBtn.onclick=()=>{
+    if(off)delete opts.sched.days[selDate];
+    else opts.sched.days[selDate]={off:true};
+    saveSched(); renderCal();
+    toast(off?'已恢復營業':'已設為公休 💤');
+  };
+  bar.appendChild(offBtn);
+  if(!off){
+    const slotBtn=document.createElement('button');
+    slotBtn.className='mini-btn';
+    const c=dayCfg(selDate);
+    slotBtn.textContent='🕐 本日時段'+(c&&c.slots?'（自訂）':'');
+    bar.appendChild(slotBtn);
+    const ed=document.createElement('div');
+    ed.style.cssText='display:none;width:100%;background:var(--milk);border-radius:var(--r-sm);padding:10px';
+    slotBtn.onclick=()=>{ed.style.display=ed.style.display==='none'?'block':'none';};
+    const renderEd=()=>{
+      ed.innerHTML='<div style="font-size:12px;color:var(--brown-soft);margin-bottom:6px">這一天開放的預約時段（會用在 IG 預約表）：</div>';
+      const chipsW=document.createElement('div'); chipsW.className='chips';
+      effSlots(selDate).forEach(t=>{
+        const ch=document.createElement('button'); ch.className='chip on';
+        ch.innerHTML=esc(t)+'　✕';
+        ch.onclick=()=>{
+          const cur=effSlots(selDate).filter(x=>x!==t);
+          opts.sched.days[selDate]={slots:cur};
+          saveSched(); renderEd(); renderBkNotice();
+        };
+        chipsW.appendChild(ch);
+      });
+      ed.appendChild(chipsW);
+      const addRow=document.createElement('div');
+      addRow.style.cssText='display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap';
+      let newT='';
+      addRow.appendChild(timeSelects('',v=>{newT=v;}));
+      const ab=document.createElement('button'); ab.className='mini-btn solid'; ab.textContent='新增時段';
+      ab.onclick=()=>{
+        if(!newT){toast('請先選時間');return;}
+        const cur=effSlots(selDate);
+        if(cur.includes(newT)){toast('這個時段已存在');return;}
+        opts.sched.days[selDate]={slots:cur.concat([newT]).sort()};
+        saveSched(); renderEd();
+      };
+      addRow.appendChild(ab);
+      if(dayCfg(selDate)&&dayCfg(selDate).slots){
+        const rb=document.createElement('button'); rb.className='mini-btn'; rb.textContent='恢復預設';
+        rb.onclick=()=>{delete opts.sched.days[selDate];saveSched();renderEd();renderDayPanel();};
+        addRow.appendChild(rb);
+      }
+      ed.appendChild(addRow);
+    };
+    renderEd();
+    bar.appendChild(ed);
+  }
+  list.appendChild(bar);
+
+  const all=live().filter(r=>r.date===selDate);
+  const bks=all.filter(r=>r.type==='booking').sort((a,b)=>(a.time||'99').localeCompare(b.time||'99'));
+  const others=all.filter(r=>r.type!=='booking').sort((a,b)=>a.updatedAt-b.updatedAt);
+  const rs=bks.concat(others);
+  if(!rs.length){
+    const emp=document.createElement('div'); emp.className='empty';
+    emp.textContent='這天還沒有紀錄，點右下角「＋」開始記帳 ☁️';
+    list.appendChild(emp); return;
+  }
   rs.forEach(r=>list.appendChild(recLi(r,true)));
   const hint=document.createElement('div');
   hint.style.cssText='font-size:11px;color:var(--brown-soft);text-align:center;padding-top:6px';
@@ -623,7 +793,7 @@ function renderRec(){
     list.appendChild(h);
     if(ds===fmtD(today))todayHdr=h;
     rs.forEach(r=>{
-      total+=r.type==='income'?r.amount:-r.amount;
+      total+=r.type==='income'?r.amount:r.type==='expense'?-r.amount:0;
       list.appendChild(recLi(r,false));
     });
   }
@@ -736,27 +906,95 @@ function renderRep(){
       '<text x="'+(x+(bw-8)/2).toFixed(1)+'" y="'+(H-8)+'" text-anchor="middle" font-size="9" fill="#A08C77">'+(i+1)+'月</text>';
   });
   $('#repBars').innerHTML='<svg width="100%" viewBox="0 0 '+W+' '+H+'" role="img">'+bars+'</svg>';
+
+  /* 常客排行（全期間累積） */
+  const vipMap={};
+  live().forEach(r=>{
+    if(r.type!=='income')return;
+    let name=r.customer||'';
+    if(!name&&r.note){const m=/客人：([^・]+)/.exec(r.note);if(m)name=m[1].trim();}
+    if(!name)return;
+    if(!vipMap[name])vipMap[name]={n:0,sum:0,last:''};
+    vipMap[name].n++; vipMap[name].sum+=r.amount;
+    if(r.date>vipMap[name].last)vipMap[name].last=r.date;
+  });
+  const vips=Object.keys(vipMap).map(k=>({name:k,...vipMap[k]}))
+    .sort((a,b)=>b.n-a.n||b.sum-a.sum).slice(0,8);
+  const medals=['🥇','🥈','🥉'];
+  $('#repVip').innerHTML=vips.length
+    ? vips.map((v,i)=>
+        '<div style="display:flex;align-items:center;gap:10px;padding:8px 2px;border-bottom:1px solid var(--line);font-size:14px">'+
+        '<span style="width:26px;text-align:center">'+(medals[i]||(i+1))+'</span>'+
+        '<span style="flex:1;font-weight:700">'+esc(v.name)+'</span>'+
+        '<span style="color:var(--brown-soft);font-size:12px">'+v.n+' 次</span>'+
+        '<span style="font-weight:700;color:var(--accent-deep)">'+money(v.sum)+'</span>'+
+        '</div>').join('')
+    : '<div class="empty" style="color:var(--brown-soft);font-size:13px;text-align:center;padding:14px 0">還沒有資料——用「預約 → 結帳」記下的收入會自動帶客人名字進來 💖</div>';
 }
 
 /* ========= 記帳 Bottom Sheet ========= */
 let entryMode='income';
-let inSel={base:null,addons:[],extra:'',removal:null,freeRemoval:false,pct:null,fixed:null,custom:'',note:''};
+let inSel={base:null,addons:[],extra:'',removal:null,freeRemoval:false,pct:null,fixed:null,custom:'',note:'',customer:''};
 let exSel={cat:'進貨',items:[],other:'',note:''};
 let calcExpr='';
 let editingId=null;   /* 正在編輯的紀錄 id；null 表示新增 */
 let editDate=null;    /* 本次表單對應的日期（編輯時沿用原紀錄日期） */
+const BK_CHANNELS=['LINE','IG','Threads','FB','電話'];
+let bkSel={name:'',time:'',channel:'',channelOther:'',planBase:null,planNote:'',deposit:''};
+
+/* 24H 制、分鐘 10 分間隔的時間選擇器 */
+function timeSelects(val,onChange){
+  const wrap=document.createElement('span');
+  wrap.style.cssText='display:inline-flex;gap:4px;align-items:center';
+  const hs=document.createElement('select'); hs.className='inline-input'; hs.style.cssText='width:88px;text-align:center';
+  const ms=document.createElement('select'); ms.className='inline-input'; ms.style.cssText='width:88px;text-align:center';
+  let hOpts='<option value="">-- 時</option>';
+  for(let h=0;h<24;h++)hOpts+='<option value="'+pad(h)+'">'+pad(h)+'</option>';
+  hs.innerHTML=hOpts;
+  const MINS=['00','10','20','30','40','50'];
+  ms.innerHTML=MINS.map(m=>'<option value="'+m+'">'+m+'</option>').join('');
+  const m0=/^(\d{1,2}):(\d{2})$/.exec(val||'');
+  if(m0){
+    hs.value=pad(+m0[1]);
+    if(!MINS.includes(m0[2]))ms.innerHTML+='<option value="'+m0[2]+'">'+m0[2]+'</option>';
+    ms.value=m0[2];
+  }
+  const colon=document.createElement('b'); colon.textContent='：';
+  const upd=()=>onChange(hs.value===''?'':hs.value+':'+ms.value);
+  hs.onchange=upd; ms.onchange=upd;
+  wrap.appendChild(hs); wrap.appendChild(colon); wrap.appendChild(ms);
+  return wrap;
+}
+
+/* 預約表時段工具 */
+const saveSched=()=>{saveOpts();scheduleSync();};
+const dayCfg=ds=>opts.sched.days[ds]||null;
+const isOffDay=ds=>{const c=dayCfg(ds);return !!(c&&c.off);};
+function effSlots(ds){
+  const c=dayCfg(ds);
+  if(c&&c.off)return [];
+  if(c&&c.slots)return c.slots.slice().sort();
+  return opts.sched.slots.slice().sort();
+}
+
+function resetForms(){
+  inSel={base:null,addons:[],extra:'',removal:null,freeRemoval:false,pct:null,fixed:null,custom:'',note:'',customer:''};
+  exSel={cat:'進貨',items:[],other:'',note:''};
+  bkSel={name:'',time:'',channel:'',channelOther:'',planBase:null,planNote:'',deposit:''};
+  calcExpr='';
+}
 
 function openEntry(rec){
   editingId=rec?rec.id:null;
   editDate=rec?rec.date:selDate;
   if(rec){
     entryMode=rec.type;
-    if(rec.type==='income')prefillIncome(rec); else prefillExpense(rec);
+    if(rec.type==='income')prefillIncome(rec);
+    else if(rec.type==='expense')prefillExpense(rec);
+    else prefillBooking(rec);
   }else{
     entryMode='income';
-    inSel={base:null,addons:[],extra:'',removal:null,freeRemoval:false,pct:null,fixed:null,custom:'',note:''};
-    exSel={cat:'進貨',items:[],other:'',note:''};
-    calcExpr='';
+    resetForms();
   }
   const d=new Date(editDate+'T00:00:00');
   $('#entryDate').textContent=(editingId?'✏️ 編輯紀錄：':'記帳日期：')+d.getFullYear()+'/'+(d.getMonth()+1)+'/'+d.getDate()+'（'+WD[d.getDay()]+'）';
@@ -764,11 +1002,47 @@ function openEntry(rec){
   $('#entryMask').classList.add('show'); $('#entrySheet').classList.add('show');
 }
 
+/* 預約 → 結帳：打開收入表單並帶入客人資訊，存檔後原預約直接轉成收入紀錄 */
+function openCheckout(bk){
+  editingId=bk.id;
+  editDate=bk.date;
+  entryMode='income';
+  resetForms();
+  if(bk.plan){
+    inSel.base=opts.base.find(o=>o.name===bk.plan.name)||{id:'x_'+uid(),name:bk.plan.name,price:bk.plan.price};
+  }
+  inSel.customer=bk.name;
+  const parts=['客人：'+bk.name];
+  if(bk.channel)parts.push(bk.channel+'預約');
+  if(bk.deposit>0)parts.push('訂金已付$'+bk.deposit);
+  if(bk.planNote)parts.push(bk.planNote);
+  inSel.note=parts.join('・');
+  const d=new Date(bk.date+'T00:00:00');
+  $('#entryDate').textContent='💰 '+bk.name+' 結帳：'+(d.getMonth()+1)+'/'+d.getDate()+'（'+WD[d.getDay()]+'）';
+  renderSeg(); renderEntryBody();
+  $('#entryMask').classList.add('show'); $('#entrySheet').classList.add('show');
+}
+
+/* 把既有預約還原成表單狀態 */
+function prefillBooking(r){
+  resetForms();
+  const ch=r.channel||'';
+  bkSel={
+    name:r.name||'',
+    time:r.time||'',
+    channel:BK_CHANNELS.includes(ch)?ch:'',
+    channelOther:BK_CHANNELS.includes(ch)?'':ch,
+    planBase:r.plan?(opts.base.find(o=>o.name===r.plan.name)||{id:'x_'+uid(),name:r.plan.name,price:r.plan.price}):null,
+    planNote:r.planNote||'',
+    deposit:r.deposit>0?String(r.deposit):''
+  };
+}
+
 /* 把既有收入紀錄還原成表單狀態 */
 function prefillIncome(r){
   const bd=r.breakdown||{};
   const findBy=(arr,it)=>arr.find(o=>o.name===it.name&&o.price===it.price)||arr.find(o=>o.name===it.name);
-  inSel={base:null,addons:[],extra:'',removal:null,freeRemoval:false,pct:null,fixed:null,custom:'',note:r.note||''};
+  inSel={base:null,addons:[],extra:'',removal:null,freeRemoval:false,pct:null,fixed:null,custom:'',note:r.note||'',customer:r.customer||''};
   exSel={cat:'進貨',items:[],other:'',note:''};
   calcExpr='';
   if(bd.base)inSel.base=findBy(opts.base,bd.base)||{id:'x_'+uid(),name:bd.base.name,price:bd.base.price};
@@ -794,7 +1068,7 @@ function prefillExpense(r){
   const known=EXP_CATS[cat]||[];
   const items=[],others=[];
   (r.items||[]).forEach(n=>known.includes(n)?items.push(n):others.push(n));
-  inSel={base:null,addons:[],extra:'',removal:null,freeRemoval:false,pct:null,fixed:null,custom:'',note:''};
+  inSel={base:null,addons:[],extra:'',removal:null,freeRemoval:false,pct:null,fixed:null,custom:'',note:'',customer:''};
   exSel={cat:cat,items:items,other:others.join('、'),note:r.note||''};
   calcExpr=String(r.amount);
 }
@@ -803,10 +1077,11 @@ $('#fabBtn').onclick=()=>openEntry();
 $('#entryMask').onclick=closeEntry;
 $('#segIn').onclick=()=>{entryMode='income';renderSeg();renderEntryBody();};
 $('#segEx').onclick=()=>{entryMode='expense';renderSeg();renderEntryBody();};
+$('#segBk').onclick=()=>{entryMode='booking';renderSeg();renderEntryBody();};
 function renderSeg(){
-  const isIn=entryMode==='income';
-  $('#segIn').className=isIn?'on in':'';
-  $('#segEx').className=isIn?'':'on ex';
+  $('#segIn').className=entryMode==='income'?'on in':'';
+  $('#segEx').className=entryMode==='expense'?'on ex':'';
+  $('#segBk').className=entryMode==='booking'?'on bk':'';
 }
 
 function chipBtn(label,price,on,cb,exStyle){
@@ -856,18 +1131,84 @@ function updateFoot(){
     val.textContent=money(incomeTotal());
     val.classList.remove('ex'); ok.classList.remove('ex');
     ok.disabled=!inSel.base;
-  }else{
+  }else if(entryMode==='expense'){
     lab.textContent='本筆採購總費用';
     val.textContent=money(calcTotal());
     val.classList.add('ex'); ok.classList.add('ex');
     ok.disabled=calcTotal()<=0;
+  }else{
+    const dep=parseFloat(bkSel.deposit);
+    lab.textContent='已收訂金（沒收可留空）';
+    val.textContent=(!isNaN(dep)&&dep>0)?money(dep):'—';
+    val.classList.remove('ex'); ok.classList.remove('ex');
+    ok.disabled=!bkSel.name.trim();
   }
 }
 
 function renderEntryBody(){
   const body=$('#entryBody'); body.innerHTML='';
-  if(entryMode==='income')renderIncome(body); else renderExpense(body);
+  if(entryMode==='income')renderIncome(body);
+  else if(entryMode==='expense')renderExpense(body);
+  else renderBooking(body);
   updateFoot();
+}
+
+/* ---- 預約頁 ---- */
+function renderBooking(body){
+  /* 客人名字 */
+  const b0=blk('客人名字（必填）');
+  const ni=document.createElement('input');
+  ni.type='text'; ni.placeholder='例：布丁狗'; ni.className='inline-input wide'; ni.value=bkSel.name;
+  ni.oninput=()=>{bkSel.name=ni.value;updateFoot();};
+  b0.chips.appendChild(ni);
+  body.appendChild(b0.wrap);
+
+  /* 預約時間 */
+  const b1=blk('預約時間（24小時制）');
+  b1.chips.appendChild(timeSelects(bkSel.time,v=>{bkSel.time=v;}));
+  body.appendChild(b1.wrap);
+
+  /* 預約管道 */
+  const b2=blk('預約管道');
+  BK_CHANNELS.forEach(ch=>{
+    b2.chips.appendChild(chipBtn(ch,null,bkSel.channel===ch,()=>{
+      bkSel.channel=bkSel.channel===ch?'':ch;
+      if(bkSel.channel)bkSel.channelOther='';
+      renderEntryBody();
+    }));
+  });
+  const oi=document.createElement('input');
+  oi.type='text'; oi.placeholder='其他管道（自行輸入）'; oi.className='inline-input'; oi.value=bkSel.channelOther;
+  oi.oninput=()=>{bkSel.channelOther=oi.value;if(oi.value)bkSel.channel='';};
+  b2.chips.appendChild(oi);
+  body.appendChild(b2.wrap);
+
+  /* 預計做的服務 */
+  const b3=blk('預計做的服務（選填，結帳時會自動帶入）');
+  opts.base.forEach(o=>{
+    b3.chips.appendChild(chipBtn(o.name,o.price,bkSel.planBase&&bkSel.planBase.id===o.id,()=>{
+      bkSel.planBase=(bkSel.planBase&&bkSel.planBase.id===o.id)?null:o;
+      renderEntryBody();
+    }));
+  });
+  if(bkSel.planBase&&!opts.base.some(o=>o.id===bkSel.planBase.id)){
+    b3.chips.appendChild(chipBtn(bkSel.planBase.name+'（已停用）',bkSel.planBase.price,true,()=>{
+      bkSel.planBase=null; renderEntryBody();
+    }));
+  }
+  const pi=document.createElement('input');
+  pi.type='text'; pi.placeholder='款式細節、客人需求…'; pi.className='inline-input wide'; pi.value=bkSel.planNote;
+  pi.oninput=()=>{bkSel.planNote=pi.value;};
+  b3.chips.appendChild(pi);
+  body.appendChild(b3.wrap);
+
+  /* 訂金 */
+  const b4=blk('訂金');
+  const di=document.createElement('input');
+  di.type='number'; di.inputMode='numeric'; di.placeholder='已收訂金金額（沒收留空）'; di.className='inline-input'; di.style.width='200px'; di.value=bkSel.deposit;
+  di.oninput=()=>{bkSel.deposit=di.value;updateFoot();};
+  b4.chips.appendChild(di);
+  body.appendChild(b4.wrap);
 }
 
 /* ---- 收入頁 ---- */
@@ -1109,10 +1450,11 @@ $('#okBtn').onclick=()=>{
         removal:inSel.removal?{name:inSel.removal.name,price:inSel.freeRemoval?0:inSel.removal.price}:null
       },
       discount:dParts.length?{label:dParts.join('・'),pct:inSel.pct,fixed:inSel.fixed||0,custom:isNaN(c)?0:c}:null,
-      note:inSel.note.trim()
+      note:inSel.note.trim(),
+      customer:inSel.customer||''
     });
     toast(wasEditing?'已更新紀錄 '+money(incomeTotal()):'已記錄收入 '+money(incomeTotal()));
-  }else{
+  }else if(entryMode==='expense'){
     const amt=calcTotal();
     if(amt<=0)return;
     const items=exSel.items.slice();
@@ -1123,8 +1465,264 @@ $('#okBtn').onclick=()=>{
     });
     toast(wasEditing?'已更新紀錄 '+money(amt):'已記錄支出 '+money(amt));
   }
+  if(entryMode==='booking'){
+    if(!bkSel.name.trim())return;
+    /* 撞單提醒：同一天且時間相距 90 分鐘內 */
+    if(bkSel.time){
+      const toMin=t=>{const m=/^(\d{1,2}):(\d{2})$/.exec(t);return m?(+m[1])*60+(+m[2]):null;};
+      const myMin=toMin(bkSel.time);
+      const near=live().filter(r=>
+        r.type==='booking'&&r.date===editDate&&r.id!==wasEditing&&r.time&&
+        myMin!=null&&toMin(r.time)!=null&&Math.abs(toMin(r.time)-myMin)<90
+      );
+      if(near.length){
+        const who=near.map(r=>r.time+' '+r.name).join('、');
+        if(!confirm('⚠️ 注意撞單：當天已有「'+who+'」的預約，時間很接近，仍要儲存嗎？'))return;
+      }
+    }
+    const dep=parseFloat(bkSel.deposit);
+    save({
+      type:'booking', date:editDate,
+      name:bkSel.name.trim(),
+      time:bkSel.time||'',
+      channel:bkSel.channel||bkSel.channelOther.trim(),
+      plan:bkSel.planBase?{name:bkSel.planBase.name,price:bkSel.planBase.price}:null,
+      planNote:bkSel.planNote.trim(),
+      deposit:(!isNaN(dep)&&dep>0)?dep:0
+    });
+    toast(wasEditing?'已更新預約':'已新增預約：'+bkSel.name.trim());
+  }
   closeEntry();
   if(wasEditing)go(curPage); else go('cal');
+};
+
+/* ===== IG 預約表圖片產生器（1080×1920，9:16 直式） ===== */
+const LS_SCHEDBG='pp_schedbg';
+let schedBg=localStorage.getItem(LS_SCHEDBG)||'';
+
+function rr(ctx,x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);
+  ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);
+  ctx.arcTo(x,y,x+w,y,r);
+  ctx.closePath();
+}
+function drawCover(ctx,img,W,H){
+  const k=Math.max(W/img.width,H/img.height);
+  const w=img.width*k,h=img.height*k;
+  ctx.drawImage(img,(W-w)/2,(H-h)/2,w,h);
+}
+/* 該日已被預約走的時段（預約時間對到最近 90 分鐘內的時段） */
+function takenSlots(ds,slots){
+  const toMin=t=>{const m=/^(\d{1,2}):(\d{2})$/.exec(t);return m?(+m[1])*60+(+m[2]):null;};
+  const taken=new Set();
+  live().filter(r=>r.type==='booking'&&r.date===ds&&r.time).forEach(b=>{
+    const bm=toMin(b.time); if(bm==null)return;
+    let best=null,bd=1e9;
+    slots.forEach(sl=>{const d=Math.abs(toMin(sl)-bm);if(d<bd){bd=d;best=sl;}});
+    if(best!=null&&bd<90)taken.add(best);
+  });
+  return taken;
+}
+
+function genSchedule(y,m){
+  const btn=$('#schedBtn');
+  btn.disabled=true; btn.textContent='產生圖片中…';
+  const W=1080,H=1920;
+  const cv=document.createElement('canvas'); cv.width=W; cv.height=H;
+  const ctx=cv.getContext('2d');
+  const done=ok=>{
+    btn.disabled=false; btn.textContent='🖼️ 產生本月 IG 預約表';
+    if(ok)toast('已產生 '+(m+1)+'月預約表 🖼️');
+  };
+  const drawBody=hasImg=>{
+    try{
+      const FONT='"PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif';
+      /* 標題 */
+      ctx.textAlign='center'; ctx.textBaseline='alphabetic';
+      if(hasImg){ctx.shadowColor='rgba(0,0,0,.5)';ctx.shadowBlur=14;ctx.fillStyle='#FFFFFF';}
+      else ctx.fillStyle='#5C4633';
+      ctx.font='400 40px '+FONT;
+      ctx.fillText(String(y),W/2,166);
+      ctx.font='800 88px '+FONT;
+      ctx.fillText('Puli puli '+(m+1)+'月預約',W/2,268);
+      ctx.shadowBlur=0;
+
+      /* 計算格子 */
+      const first=new Date(y,m,1);
+      const offset=(first.getDay()+6)%7;          /* 週一開頭 */
+      const days=new Date(y,m+1,0).getDate();
+      const rows=Math.ceil((offset+days)/7);
+      const slotsByDay={}; let maxSl=0;
+      for(let d=1;d<=days;d++){
+        const ds=y+'-'+pad(m+1)+'-'+pad(d);
+        const sl=effSlots(ds);
+        slotsByDay[d]=sl;
+        if(sl.length>maxSl)maxSl=sl.length;
+      }
+      maxSl=Math.max(maxSl,1);
+      const footerLines=(opts.sched.footer||'').split('\n').filter(x=>x.trim());
+
+      const px=64,pw=W-128,py=330;
+      const headH=64;
+      let rowH=66+maxSl*42;
+      const footH=footerLines.length?56+footerLines.length*44:20;
+      let panelH=44+headH+rows*rowH+footH+30;
+      const maxPanel=H-py-60;
+      if(panelH>maxPanel){
+        rowH=Math.max(96,Math.floor((maxPanel-44-headH-footH-30)/rows));
+        panelH=44+headH+rows*rowH+footH+30;
+      }
+      /* 白色面板 */
+      ctx.fillStyle=hasImg?'rgba(255,255,255,.86)':'rgba(255,255,255,.66)';
+      rr(ctx,px,py,pw,panelH,36); ctx.fill();
+
+      const gx=px+34, gw=pw-68, colW=gw/7;
+      const gy=py+44;
+      /* 星期列 */
+      ctx.fillStyle='#A08C77'; ctx.font='700 26px '+FONT;
+      ['MON','TUE','WED','THU','FRI','SAT','SUN'].forEach((t,i)=>{
+        ctx.fillText(t,gx+i*colW+colW/2,gy+34);
+      });
+      /* 分隔線 */
+      ctx.strokeStyle='rgba(160,140,119,.35)'; ctx.lineWidth=2;
+      for(let r0=0;r0<=rows;r0++){
+        const ly=gy+headH+r0*rowH;
+        ctx.beginPath();ctx.moveTo(gx,ly);ctx.lineTo(gx+gw,ly);ctx.stroke();
+      }
+      for(let c0=1;c0<7;c0++){
+        ctx.beginPath();ctx.moveTo(gx+c0*colW,gy+headH);ctx.lineTo(gx+c0*colW,gy+headH+rows*rowH);ctx.stroke();
+      }
+      /* 每一天 */
+      const slotFit=Math.floor((rowH-58)/40);
+      for(let d=1;d<=days;d++){
+        const r0=Math.floor((offset+d-1)/7), c0=(offset+d-1)%7;
+        const cx=gx+c0*colW+colW/2;
+        const cy=gy+headH+r0*rowH;
+        const ds=y+'-'+pad(m+1)+'-'+pad(d);
+        ctx.fillStyle='#7A6450'; ctx.font='700 28px '+FONT;
+        ctx.fillText(String(d),cx,cy+38);
+        const sl=slotsByDay[d];
+        if(isOffDay(ds)){
+          ctx.fillStyle='#C9A176'; ctx.font='400 24px '+FONT;
+          ctx.fillText('休',cx,cy+78);
+          continue;
+        }
+        const taken=takenSlots(ds,sl);
+        sl.slice(0,Math.max(slotFit,1)).forEach((t,i)=>{
+          const sy=cy+58+i*40;
+          if(taken.has(t)){
+            ctx.fillStyle='#E8D5B8';
+            rr(ctx,cx-(colW-30)/2,sy-6,colW-30,30,15); ctx.fill();
+          }else{
+            ctx.fillStyle='#5C4633'; ctx.font='400 27px '+FONT;
+            ctx.fillText(t,cx,sy+16);
+          }
+        });
+      }
+      /* 底部說明文字 */
+      if(footerLines.length){
+        ctx.textAlign='left';
+        let fy=gy+headH+rows*rowH+58;
+        footerLines.forEach((line,i)=>{
+          ctx.fillStyle=i===0?'#5C4633':'#7A6450';
+          ctx.font=(i===0?'700 30px ':'400 26px ')+FONT;
+          ctx.fillText(line,gx+10,fy);
+          fy+=44;
+        });
+      }
+      /* 輸出 */
+      const a=document.createElement('a');
+      a.href=cv.toDataURL('image/png');
+      a.download='pulipuli-'+y+'-'+pad(m+1)+'-預約表.png';
+      a.click();
+      done(true);
+    }catch(e){done(false);toast('產生失敗，請再試一次');}
+  };
+  if(schedBg){
+    const img=new Image();
+    img.onload=()=>{drawCover(ctx,img,W,H);drawBody(true);};
+    img.onerror=()=>{paintDefault();drawBody(false);};
+    img.src=schedBg;
+  }else{paintDefault();drawBody(false);}
+
+  function paintDefault(){
+    ctx.fillStyle=theme.color||THEME_DEFAULT_COLOR;
+    ctx.fillRect(0,0,W,H);
+    /* 可愛的柔色圓點裝飾 */
+    const deco=[[120,140,90],[940,120,70],[180,1750,110],[900,1800,85],[70,900,60],[1010,1000,65],[540,60,45],[990,1860,40],[60,1500,50]];
+    const cols=['#C9A176','#D3A593','#A8B5A0','#B9A6C0','#D9C7A3'];
+    deco.forEach((p,i)=>{
+      ctx.globalAlpha=.18;
+      ctx.fillStyle=cols[i%cols.length];
+      ctx.beginPath();ctx.arc(p[0],p[1],p[2],0,Math.PI*2);ctx.fill();
+    });
+    ctx.globalAlpha=1;
+  }
+}
+$('#schedBtn').onclick=()=>genSchedule(calY,calM);
+
+/* 預約表背景圖上傳 */
+$('#schedBgFile').onchange=e=>{
+  const f=e.target.files[0]; e.target.value='';
+  if(!f)return;
+  const img=new Image();
+  img.onload=()=>{
+    const MAX=1920;
+    let w=img.width,h=img.height;
+    if(Math.max(w,h)>MAX){const k=MAX/Math.max(w,h);w=Math.round(w*k);h=Math.round(h*k);}
+    const cv=document.createElement('canvas'); cv.width=w; cv.height=h;
+    cv.getContext('2d').drawImage(img,0,0,w,h);
+    let data;
+    try{data=cv.toDataURL('image/jpeg',0.82);}catch(err){toast('讀取圖片失敗');return;}
+    if(data.length>4000000){toast('圖片太大，請換一張');return;}
+    schedBg=data;
+    try{localStorage.setItem(LS_SCHEDBG,schedBg);}catch(err){toast('儲存空間不足');return;}
+    if($('#setSheet').classList.contains('show'))openSettings();
+    toast('已設定預約表背景 🖼️');
+  };
+  img.onerror=()=>toast('讀取圖片失敗');
+  const fr=new FileReader();
+  fr.onload=()=>{img.src=fr.result;};
+  fr.readAsDataURL(f);
+};
+
+/* ===== 報表匯出成圖片 ===== */
+let _h2cPromise=null;
+function loadH2C(){
+  if(window.html2canvas)return Promise.resolve();
+  if(_h2cPromise)return _h2cPromise;
+  _h2cPromise=new Promise((res,rej)=>{
+    const sc=document.createElement('script');
+    sc.src='https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+    sc.onload=res; sc.onerror=()=>{_h2cPromise=null;rej(new Error('load fail'))};
+    document.head.appendChild(sc);
+  });
+  return _h2cPromise;
+}
+$('#repExport').onclick=async()=>{
+  const btn=$('#repExport');
+  btn.disabled=true; btn.textContent='產生圖片中…';
+  try{
+    await loadH2C();
+    btn.style.display='none';
+    const canvas=await window.html2canvas($('#pageRep'),{
+      backgroundColor:theme.color||THEME_DEFAULT_COLOR,
+      scale:2, useCORS:true
+    });
+    btn.style.display='';
+    const a=document.createElement('a');
+    a.href=canvas.toDataURL('image/png');
+    a.download='pulipuli-報表-'+fmtD(new Date())+'.png';
+    a.click();
+    toast('已匯出報表圖片 🖼️');
+  }catch(e){
+    btn.style.display='';
+    toast('匯出失敗，請確認網路後再試一次');
+  }
+  btn.disabled=false; btn.textContent='🖼️ 把這頁報表匯出成圖片';
 };
 
 /* ========= 設定 Sheet（同步／備份） ========= */
@@ -1134,6 +1732,107 @@ function closeSettings(){$('#setMask').classList.remove('show');$('#setSheet').c
 
 function openSettings(){
   const body=$('#setBody'); body.innerHTML='';
+
+  /* ---- 外觀 ---- */
+  const ap=document.createElement('div'); ap.className='blk';
+  ap.innerHTML='<div class="blk-t">🎨 外觀</div>'+
+    '<div class="note-mini" style="margin:0 0 8px">背景設定只儲存在這台裝置，不會跟著雲端同步。</div>';
+  const sw=document.createElement('div');
+  sw.style.cssText='display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:10px';
+  const renderSwatches=()=>{
+    sw.innerHTML='';
+    THEME_PRESETS.forEach(([c,name])=>{
+      const b=document.createElement('button');
+      b.title=name;
+      const on=theme.color.toUpperCase()===c.toUpperCase();
+      b.style.cssText='width:34px;height:34px;border-radius:50%;background:'+c+';border:2px solid '+(on?'var(--accent-deep)':'var(--line)')+';box-shadow:'+(on?'0 0 0 3px rgba(168,126,82,.25)':'none');
+      b.onclick=()=>{theme.color=c;saveTheme();applyTheme();renderSwatches();toast('背景色：'+name);};
+      sw.appendChild(b);
+    });
+    /* 自選顏色 */
+    const wrap=document.createElement('label');
+    wrap.style.cssText='width:34px;height:34px;border-radius:50%;border:2px dashed var(--brown-soft);display:flex;align-items:center;justify-content:center;font-size:15px;cursor:pointer;overflow:hidden;position:relative';
+    wrap.textContent='🎨';
+    const ci=document.createElement('input');
+    ci.type='color'; ci.value=theme.color;
+    ci.style.cssText='position:absolute;inset:0;opacity:0;cursor:pointer';
+    ci.oninput=()=>{theme.color=ci.value;saveTheme();applyTheme();renderSwatches();};
+    wrap.appendChild(ci);
+    sw.appendChild(wrap);
+  };
+  renderSwatches();
+  ap.appendChild(sw);
+
+  const bgRow=document.createElement('div'); bgRow.className='btn-row';
+  const bUp=document.createElement('button'); bUp.className='mini-btn'; bUp.textContent='🖼️ 上傳背景圖';
+  bUp.onclick=()=>$('#bgFile').click();
+  bgRow.appendChild(bUp);
+  if(theme.image){
+    const bRm=document.createElement('button'); bRm.className='mini-btn'; bRm.textContent='移除背景圖';
+    bRm.onclick=()=>{theme.image='';saveTheme();applyTheme();openSettings();toast('已移除背景圖');};
+    bgRow.appendChild(bRm);
+  }
+  ap.appendChild(bgRow);
+  body.appendChild(ap);
+
+  /* ---- IG 預約表設定 ---- */
+  const sp=document.createElement('div'); sp.className='blk';
+  sp.innerHTML='<div class="blk-t">📅 IG 預約表</div>'+
+    '<div class="note-mini" style="margin:0 0 8px">每日預設開放時段（單日不同可在月曆當天用「🕐 本日時段」調整）：</div>';
+  const slotChips=document.createElement('div'); slotChips.className='chips';
+  const renderSlotChips=()=>{
+    slotChips.innerHTML='';
+    opts.sched.slots.slice().sort().forEach(t=>{
+      const ch=document.createElement('button'); ch.className='chip on';
+      ch.innerHTML=esc(t)+'　✕';
+      ch.onclick=()=>{
+        opts.sched.slots=opts.sched.slots.filter(x=>x!==t);
+        saveSched(); renderSlotChips();
+      };
+      slotChips.appendChild(ch);
+    });
+  };
+  renderSlotChips();
+  sp.appendChild(slotChips);
+  const addRow=document.createElement('div');
+  addRow.style.cssText='display:flex;gap:8px;align-items:center;margin:8px 0 12px;flex-wrap:wrap';
+  let newSlot='';
+  addRow.appendChild(timeSelects('',v=>{newSlot=v;}));
+  const ab=document.createElement('button'); ab.className='mini-btn solid'; ab.textContent='新增時段';
+  ab.onclick=()=>{
+    if(!newSlot){toast('請先選時間');return;}
+    if(opts.sched.slots.includes(newSlot)){toast('這個時段已存在');return;}
+    opts.sched.slots.push(newSlot); opts.sched.slots.sort();
+    saveSched(); renderSlotChips();
+  };
+  addRow.appendChild(ab);
+  sp.appendChild(addRow);
+
+  const fLab=document.createElement('div'); fLab.className='note-mini';
+  fLab.style.margin='0 0 6px'; fLab.textContent='預約表底部的說明文字（第一行會比較大）：';
+  sp.appendChild(fLab);
+  const fTa=document.createElement('textarea');
+  fTa.className='inline-input wide'; fTa.rows=5;
+  fTa.style.cssText='width:100%;resize:vertical;line-height:1.6';
+  fTa.value=opts.sched.footer||'';
+  fTa.onchange=()=>{opts.sched.footer=fTa.value;saveSched();toast('已更新說明文字');};
+  sp.appendChild(fTa);
+
+  const sBgRow=document.createElement('div'); sBgRow.className='btn-row';
+  const sUp=document.createElement('button'); sUp.className='mini-btn'; sUp.textContent='🖼️ 預約表背景圖';
+  sUp.onclick=()=>$('#schedBgFile').click();
+  sBgRow.appendChild(sUp);
+  if(schedBg){
+    const sRm=document.createElement('button'); sRm.className='mini-btn'; sRm.textContent='移除（用主題色版型）';
+    sRm.onclick=()=>{schedBg='';localStorage.removeItem(LS_SCHEDBG);openSettings();toast('已改回主題色版型');};
+    sBgRow.appendChild(sRm);
+  }
+  sp.appendChild(sBgRow);
+  const sNote=document.createElement('div'); sNote.className='note-mini';
+  sNote.style.marginTop='6px';
+  sNote.textContent='時段與說明文字會雲端同步；背景圖只存在這台裝置。';
+  sp.appendChild(sNote);
+  body.appendChild(sp);
 
   const card=document.createElement('div'); card.className='blk';
   card.innerHTML='<div class="blk-t">☁️ 雲端同步（GitHub Gist）</div>'+
@@ -1193,6 +1892,30 @@ function openSettings(){
   refreshSyncStatus();
   $('#setMask').classList.add('show'); $('#setSheet').classList.add('show');
 }
+
+/* 背景圖上傳：縮圖壓縮後存到 localStorage */
+$('#bgFile').onchange=e=>{
+  const f=e.target.files[0]; e.target.value='';
+  if(!f)return;
+  const img=new Image();
+  img.onload=()=>{
+    const MAX=1400;
+    let w=img.width,h=img.height;
+    if(Math.max(w,h)>MAX){const k=MAX/Math.max(w,h);w=Math.round(w*k);h=Math.round(h*k);}
+    const cv=document.createElement('canvas'); cv.width=w; cv.height=h;
+    cv.getContext('2d').drawImage(img,0,0,w,h);
+    let data;
+    try{data=cv.toDataURL('image/jpeg',0.8);}catch(err){toast('讀取圖片失敗');return;}
+    if(data.length>3500000){toast('圖片壓縮後仍太大，請換一張');return;}
+    theme.image=data; saveTheme(); applyTheme();
+    if($('#setSheet').classList.contains('show'))openSettings();
+    toast('已套用背景圖 🖼️');
+  };
+  img.onerror=()=>toast('讀取圖片失敗');
+  const fr=new FileReader();
+  fr.onload=()=>{img.src=fr.result;};
+  fr.readAsDataURL(f);
+};
 
 $('#importFile').onchange=e=>{
   const f=e.target.files[0]; if(!f)return;
@@ -1296,7 +2019,7 @@ async function syncNow(manual){
     /* 合併 */
     if(remote){
       records=mergeRecords(records,remote.records||[]);
-      if(remote.opts&&(remote.opts.updatedAt||0)>(opts.updatedAt||0))opts=remote.opts;
+      if(remote.opts&&(remote.opts.updatedAt||0)>(opts.updatedAt||0)){opts=remote.opts;ensureSched();}
       saveRecords(); localStorage.setItem(LS_OPT,JSON.stringify(opts));
     }
     /* 上傳 */
@@ -1329,6 +2052,7 @@ async function syncNow(manual){
 }
 
 /* ========= 啟動 ========= */
+applyTheme();
 renderCal();
 if(syncCfg.token)syncNow(false);
 else refreshSyncStatus();
