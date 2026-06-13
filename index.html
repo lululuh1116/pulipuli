@@ -53,6 +53,7 @@ button:focus-visible{outline:2px solid var(--accent-deep);outline-offset:2px}
 
 .page>.note-mini{color:var(--on-bg-soft,var(--brown-soft))}
 
+.sched-preview-tag{font-size:11px;color:var(--brown-soft);background:var(--milk);border-radius:999px;padding:5px 12px;display:inline-block;margin-bottom:12px}
 /* ===== RWD：網頁版單純加寬，排版與手機相同 ===== */
 @media(min-width:768px){
   main{max-width:720px}
@@ -104,7 +105,7 @@ main{padding:14px 16px 120px;max-width:560px;margin:0 auto}
 .page.on{display:block;animation:fadein .25s ease}
 @keyframes fadein{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
 
-.card{background:var(--card);border-radius:var(--r-lg);box-shadow:var(--shadow);padding:16px;margin-bottom:14px}
+.card{background:var(--card-bg,var(--card));border-radius:var(--r-lg);box-shadow:var(--shadow);padding:16px;margin-bottom:14px}
 .card h3{font-size:14px;font-weight:700;color:var(--ink-title,var(--brown-2));margin-bottom:10px;display:flex;align-items:center;gap:6px}
 
 /* ===== 月曆 ===== */
@@ -225,6 +226,15 @@ main{padding:14px 16px 120px;max-width:560px;margin:0 auto}
   box-shadow:0 -8px 40px rgba(92,70,51,.25);
 }
 .sheet.show{transform:none}
+#schedPrevModal{position:fixed;inset:0;z-index:70;display:none;align-items:center;justify-content:center;padding:16px}
+#schedPrevModal.show{display:flex}
+#schedPrevModal .sp-inner{background:var(--card);border-radius:20px;max-width:420px;width:100%;max-height:92vh;display:flex;flex-direction:column;box-shadow:0 12px 48px rgba(0,0,0,.3);overflow:hidden}
+#schedPrevModal .sp-head{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--line)}
+#schedPrevModal .sp-imgwrap{flex:1;overflow:auto;padding:14px;background:var(--milk);display:flex;justify-content:center}
+#schedPrevModal .sp-imgwrap img{max-width:100%;height:auto;border-radius:10px;box-shadow:var(--shadow-sm);align-self:flex-start}
+#schedPrevModal .sp-foot{display:flex;gap:10px;padding:14px 16px;border-top:1px solid var(--line)}
+#colorEditorMask{z-index:59}
+.editor-head{display:flex;align-items:center;gap:8px}
 .sheet-grip{width:42px;height:5px;border-radius:99px;background:var(--line);margin:10px auto 4px;flex:none}
 .sheet-head{padding:4px 18px 10px;flex:none}
 .sheet-body{overflow-y:auto;padding:0 18px 16px;-webkit-overflow-scrolling:touch}
@@ -379,6 +389,7 @@ main{padding:14px 16px 120px;max-width:560px;margin:0 auto}
   <!-- 頁面：IG 預約表 -->
   <section class="page" id="pageSched">
     <div class="card">
+      <div class="sched-preview-tag" id="schedPreviewTag"></div>
       <div class="cal-head">
         <button class="cal-nav" id="schedPrev" aria-label="上個月">‹</button>
         <div class="ttl" id="schedTitle"></div>
@@ -386,7 +397,7 @@ main{padding:14px 16px 120px;max-width:560px;margin:0 auto}
       </div>
       <div id="schedPreview"></div>
     </div>
-    <button class="ok-btn" id="schedBtn" style="width:100%">🖼️ 產生這個月的 IG 預約表</button>
+    <button class="ok-btn" id="schedBtn" style="width:100%">產生本月 IG 預約表預覽圖</button>
     <div class="card" style="margin-top:14px">
       <button class="fold-t" id="schedCfgT"><span>⚙︎ 預約表設定（時段・說明文字・背景）</span><span class="arr">▾</span></button>
       <div class="fold-body" id="schedCfgBody"></div>
@@ -472,6 +483,32 @@ main{padding:14px 16px 120px;max-width:560px;margin:0 auto}
   <div class="sheet-grip"></div>
   <div class="sheet-head"><h3 style="text-align:center;font-size:15px;font-weight:800">設定</h3></div>
   <div class="sheet-body" id="setBody"></div>
+</div>
+
+<div class="sheet-mask" id="colorEditorMask"></div>
+<div class="sheet" id="colorEditor" role="dialog" aria-label="配色編輯器" style="z-index:60">
+  <div class="sheet-grip"></div>
+  <div class="sheet-head editor-head">
+    <button class="mini-btn" id="ceCancel">取消</button>
+    <h3 style="flex:1;text-align:center;font-size:15px;font-weight:800">配色編輯器</h3>
+    <button class="mini-btn solid" id="ceSave">儲存</button>
+  </div>
+  <div class="sheet-body" id="colorEditorBody"></div>
+</div>
+
+<div class="sheet-mask" id="schedPrevMask"></div>
+<div id="schedPrevModal" role="dialog" aria-label="預約表預覽">
+  <div class="sp-inner">
+    <div class="sp-head">
+      <span style="font-weight:800;font-size:15px">預約表預覽</span>
+      <button class="mini-btn" id="spClose">✕</button>
+    </div>
+    <div class="sp-imgwrap"><img id="spImg" alt="預約表預覽"></div>
+    <div class="sp-foot">
+      <button class="mini-btn" id="spBack">返回調整</button>
+      <button class="ok-btn" id="spDownload" style="flex:1">⬇️ 下載這張</button>
+    </div>
+  </div>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -566,6 +603,30 @@ function ensureSched(){
   /* 店家基本資料 */
   if(!opts.store){opts.store={name:'PuliPuli.Studio',logo:''};dirty=true;}
   if(opts.store.logo==null)opts.store.logo='';
+  /* v6：App 字體改為只存本機，從同步資料移除 */
+  if(opts.look&&opts.look.font){
+    try{
+      const lt=JSON.parse(localStorage.getItem(LS_THEME)||'{}');
+      if(!lt.font){lt.font=opts.look.font;localStorage.setItem(LS_THEME,JSON.stringify(lt));}
+    }catch(e){}
+    delete opts.look.font; dirty=true;
+  }
+  /* v5：覆寫制 → 自訂 SET */
+  if(opts.look&&!opts.look.customSets)opts.look.customSets=[];
+  if(opts.look&&(opts.look.color||opts.look.btn||opts.look.textTitle||opts.look.textBody)){
+    const base=THEME_SETS[opts.look.set]||THEME_SETS.dark;
+    const mine=JSON.parse(JSON.stringify(base));
+    mine.id='c_'+uid(); mine.name='我的配色';
+    if(opts.look.color)mine.cream=opts.look.color;
+    if(opts.look.btn)mine.btn=opts.look.btn;
+    if(opts.look.textTitle){mine.ink=opts.look.textTitle;}
+    if(opts.look.textBody){mine.ink=opts.look.textBody;}
+    opts.look.customSets.push(mine);
+    opts.look.set=mine.id;
+    delete opts.look.color; delete opts.look.btn;
+    delete opts.look.textTitle; delete opts.look.textBody;
+    dirty=true;
+  }
   /* v4：外觀改為主題 SET 制 */
   if(opts.look&&!opts.look.set){
     const c=(opts.look.color||'').toUpperCase();
@@ -577,6 +638,9 @@ function ensureSched(){
     dirty=true;
   }
   if(!opts.sched.font)opts.sched.font='inherit';
+  if(!opts.sched.themeSet)opts.sched.themeSet='inherit';
+  if(opts.sched.panelAlpha==null)opts.sched.panelAlpha=0.92;
+  if(opts.look&&opts.look.cardAlpha==null)opts.look.cardAlpha=1;
   /* v3 結構調整：純卸甲移到卸甲區、移除基礎服務的「卸甲」與「當月優惠款」chip（改為自填） */
   if(!opts.mig3){
     opts.base=opts.base.filter(o=>o.name!=='卸甲');
@@ -644,20 +708,68 @@ const THEME_SETS={
     deco:['#C9A176','#D3A593','#A8B5A0','#B9A6C0','#D9C7A3']
   }
 };
-function curSet(){return THEME_SETS[theme&&theme.set]||THEME_SETS.dark;}
-function resolvedBg(){return (theme&&theme.color)||curSet().cream;}
-function resolvedBtn(){return (theme&&theme.btn)||curSet().btn;}
+function customSets(){return (opts&&opts.look&&opts.look.customSets)||[];}
+function curSet(){
+  if(theme&&THEME_SETS[theme.set])return THEME_SETS[theme.set];
+  const c=theme&&customSets().find(x=>x.id===theme.set);
+  return c||THEME_SETS.dark;
+}
+/* 色彩工具 */
+function normHex(v){
+  if(!v)return null;
+  let h=String(v).trim().replace(/^#/,'');
+  if(/^[0-9a-fA-F]{3}$/.test(h))h=h.split('').map(c=>c+c).join('');
+  if(/^[0-9a-fA-F]{6}$/.test(h))return '#'+h.toUpperCase();
+  return null;
+}
+function hex2rgb(h){h=h.replace('#','');return [parseInt(h.slice(0,2),16),parseInt(h.slice(2,4),16),parseInt(h.slice(4,6),16)];}
+function rgb2hex(r,g,b){const f=v=>('0'+Math.round(Math.max(0,Math.min(255,v))).toString(16)).slice(-2);return ('#'+f(r)+f(g)+f(b)).toUpperCase();}
+function mixHex(a,b,t){const A=hex2rgb(a),B=hex2rgb(b);return rgb2hex(A[0]+(B[0]-A[0])*t,A[1]+(B[1]-A[1])*t,A[2]+(B[2]-A[2])*t);}
+const lightenHex=(c,t)=>mixHex(c,'#FFFFFF',t);
+const darkenHex=(c,t)=>mixHex(c,'#000000',t);
+/* 五色快速生成整套 */
+function genSetFrom5(bg,btn,text,soft,pop){
+  return {
+    cream:bg, btn:btn, brown:text, ink:text,
+    brown2:mixHex(text,soft,.4), brownSoft:soft,
+    card:mixHex(soft,'#FFFFFF',.92), sheet:mixHex(soft,'#FFFFFF',.88),
+    milk:mixHex(soft,'#FFFFFF',.78), line:mixHex(soft,'#FFFFFF',.6),
+    accent:lightenHex(btn,.25), accentDeep:darkenHex(btn,.15),
+    inBg:lightenHex(btn,.85), inDeep:darkenHex(btn,.15),
+    exMain:mixHex(btn,pop,.5), exBg:lightenHex(mixHex(btn,pop,.5),.82), exDeep:darkenHex(mixHex(btn,pop,.5),.15),
+    bk:pop, bkDot:pop, bkBg:lightenHex(pop,.82), bkLine:lightenHex(pop,.62),
+    cover:lightenHex(pop,.45), barOn:darkenHex(btn,.15), barOff:lightenHex(btn,.72),
+    pieIn:btn, pieEx:mixHex(btn,pop,.5),
+    pie:[btn,pop,soft,mixHex(btn,pop,.5),darkenHex(btn,.18),lightenHex(pop,.25),lightenHex(btn,.28),mixHex(soft,text,.3)],
+    deco:[btn,pop,soft,lightenHex(btn,.28),lightenHex(pop,.25)]
+  };
+}
+/* 編輯器用的 token 清單（分組） */
+const TOKEN_GROUPS=[
+  ['基底',[['cream','背景'],['card','卡片'],['sheet','彈出表單面板'],['milk','次要底色'],['line','分隔線']]],
+  ['文字',[['ink','標題與內文'],['brown','主文字（深底元件）'],['brown2','次文字'],['brownSoft','弱化文字']]],
+  ['按鈕與強調',[['btn','按鈕底色'],['accent','強調'],['accentDeep','強調（深）']]],
+  ['收入',[['inBg','圖示底'],['inDeep','金額與圓點']]],
+  ['支出',[['exBg','圖示底'],['exMain','主色'],['exDeep','金額']]],
+  ['預約',[['bk','主色（頁籤／結帳）'],['bkBg','提醒卡底'],['bkLine','提醒卡框'],['bkDot','月曆圓點']]],
+  ['IG 預約表與報表',[['cover','已預約遮色塊'],['barOn','客流量長條（當月）'],['barOff','客流量長條（其他月）'],['pieIn','圓餅：收入'],['pieEx','圓餅：支出']]]
+];
+function schedSet(){
+  const id=opts&&opts.sched&&opts.sched.themeSet;
+  if(!id||id==='inherit')return curSet();
+  if(THEME_SETS[id])return THEME_SETS[id];
+  const c=customSets().find(x=>x.id===id);
+  return c||curSet();
+}
+function resolvedBg(){return curSet().cream;}
+function resolvedBtn(){return curSet().btn;}
 let theme=null;
 function loadThemeObj(){
   const lk=(opts&&opts.look)||{};
   const local=loadJSON(LS_THEME,{})||{};
   theme={
     set:lk.set||'dark',
-    color:lk.color||'',      /* ''＝跟隨 SET，以下同 */
-    btn:lk.btn||'',
-    font:lk.font||'system',
-    textTitle:lk.textTitle||'',
-    textBody:lk.textBody||'',
+    font:local.font||lk.font||'system',
     image:local.image||''
   };
 }
@@ -682,7 +794,7 @@ function ensureFontCss(){
   document.head.appendChild(l);
   /* 辰宇落雁體（OFL 開源，從 jsDelivr CDN 載入） */
   const st=document.createElement('style');
-  st.textContent="@font-face{font-family:'ChenYuluoyan';src:url('https://cdn.jsdelivr.net/gh/Chenyu-otf/chenyuluoyan_thin@main/ChenYuluoyan-2.0-Thin.ttf') format('truetype');font-display:swap;}";
+  st.textContent="@font-face{font-family:'ChenYuluoyan';src:url('https://cdn.jsdelivr.net/gh/Chenyu-otf/chenyuluoyan_thin@main/ChenYuluoyan-2.0-Thin.ttf') format('truetype');font-display:swap;size-adjust:128%;}";
   document.head.appendChild(st);
 }
 function btnTextColor(hex){
@@ -693,10 +805,10 @@ function btnTextColor(hex){
   return (r*0.299+g*0.587+b*0.114)>165?'#5C4633':'#FFF9F2';
 }
 function saveTheme(){
-  /* 顏色與字體 → 雲端同步；背景圖太大只存本機 */
-  opts.look={set:theme.set,color:theme.color,btn:theme.btn,font:theme.font,textTitle:theme.textTitle,textBody:theme.textBody};
+  /* 配色 → 雲端同步；字體與背景圖只存本機 */
+  opts.look={set:theme.set,customSets:customSets(),cardAlpha:(opts.look&&opts.look.cardAlpha!=null)?opts.look.cardAlpha:1};
   saveOpts(); scheduleSync();
-  try{localStorage.setItem(LS_THEME,JSON.stringify({image:theme.image}))}catch(e){toast('圖片太大，無法儲存，請換一張小一點的')}
+  try{localStorage.setItem(LS_THEME,JSON.stringify({image:theme.image,font:theme.font}))}catch(e){toast('圖片太大，無法儲存，請換一張小一點的')}
 }
 function hexToRgba(hex,a){
   const m=/^#?([0-9a-f]{6})$/i.exec(hex||'');
@@ -704,12 +816,12 @@ function hexToRgba(hex,a){
   const n=parseInt(m[1],16);
   return 'rgba('+((n>>16)&255)+','+((n>>8)&255)+','+(n&255)+','+a+')';
 }
-function applyTheme(){
-  const S=curSet();
-  const bg=resolvedBg();
-  const btn=resolvedBtn();
-  const inkT=theme.textTitle||S.ink;
-  const inkB=theme.textBody||S.ink;
+function applyTheme(draft){
+  const S=draft||curSet();
+  const bg=S.cream;
+  const btn=S.btn;
+  const inkT=S.ink;
+  const inkB=S.ink;
   const root=document.documentElement.style;
   root.setProperty('--cream',bg);
   root.setProperty('--milk',S.milk);
@@ -723,6 +835,8 @@ function applyTheme(){
   root.setProperty('--btn-text',btnTextColor(btn));
   root.setProperty('--ink-title',inkT);
   root.setProperty('--ink-body',inkB);
+  const cAlpha=(opts.look&&opts.look.cardAlpha!=null)?opts.look.cardAlpha:1;
+  root.setProperty('--card-bg',hexToRgba(S.card,cAlpha));
   /* 功能色（收入／支出／預約／強調／圖表） */
   root.setProperty('--accent',S.accent);
   root.setProperty('--accent-deep',S.accentDeep);
@@ -756,7 +870,7 @@ function applyTheme(){
     document.body.style.fontFamily='';
   }
   /* 辰宇落雁體量感較小，整體放大一級 */
-  document.body.style.zoom=(theme.font==='ChenYuluoyan')?'1.1':'';
+
   /* 店名與 LOGO */
   const bn=document.getElementById('brandName');
   if(bn&&opts.store)bn.textContent=opts.store.name||'PuliPuli.Studio';
@@ -1149,8 +1263,8 @@ function renderRep(){
     const h=c/max*(H-34);
     const x=i*bw+4, yb=H-22-h;
     bars+='<rect x="'+x.toFixed(1)+'" y="'+yb.toFixed(1)+'" width="'+(bw-8).toFixed(1)+'" height="'+Math.max(h,1.5).toFixed(1)+'" rx="5" fill="'+(i===today.getMonth()?curSet().barOn:curSet().barOff)+'"/>'+
-      (c>0?'<text x="'+(x+(bw-8)/2).toFixed(1)+'" y="'+(yb-4).toFixed(1)+'" text-anchor="middle" font-size="9" fill="#8A7560">'+c+'</text>':'')+
-      '<text x="'+(x+(bw-8)/2).toFixed(1)+'" y="'+(H-8)+'" text-anchor="middle" font-size="9" fill="#A08C77">'+(i+1)+'月</text>';
+      (c>0?'<text x="'+(x+(bw-8)/2).toFixed(1)+'" y="'+(yb-4).toFixed(1)+'" text-anchor="middle" font-size="9" fill="'+curSet().brown2+'">'+c+'</text>':'')+
+      '<text x="'+(x+(bw-8)/2).toFixed(1)+'" y="'+(H-8)+'" text-anchor="middle" font-size="9" fill="'+curSet().brownSoft+'">'+(i+1)+'月</text>';
   });
   $('#repBars').innerHTML='<svg width="100%" viewBox="0 0 '+W+' '+H+'" role="img">'+bars+'</svg>';
 
@@ -1895,26 +2009,26 @@ function takenSlots(ds,slots){
 
 function genSchedule(y,m){
   const btn=$('#schedBtn');
-  btn.disabled=true; btn.textContent='產生圖片中…';
+  btn.disabled=true; btn.textContent='產生預覽中…';
   const W=1080,H=1920;
   const cv=document.createElement('canvas'); cv.width=W; cv.height=H;
   const ctx=cv.getContext('2d');
   const done=ok=>{
-    btn.disabled=false; btn.textContent='🖼️ 產生本月 IG 預約表';
-    if(ok)toast('已產生 '+(m+1)+'月預約表 🖼️');
+    btn.disabled=false; btn.textContent='產生本月 IG 預約表預覽圖';
+    if(ok)toast('預覽已產生，確認後下載 🖼️');
   };
   const schedFam=(opts.sched.font&&opts.sched.font!=='inherit')?opts.sched.font:theme.font;
   const drawBody=hasImg=>{
     try{
       const fam=(schedFam&&schedFam!=='system')?'"'+schedFam+'",':'';
       const FONT=fam+'"PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif';
-      const FS=(schedFam==='ChenYuluoyan')?1.18:1;
+      const FS=(schedFam==='ChenYuluoyan')?1.28:1;
       const F=(wgt,px)=>wgt+' '+Math.round(px*FS)+'px '+FONT;
       /* 標題（背景圖或深色底 → 白字加陰影） */
-      const darkBg=hasImg||btnTextColor(resolvedBg())==='#FFF9F2';
+      const darkBg=hasImg||btnTextColor(schedSet().cream)==='#FFF9F2';
       ctx.textAlign='center'; ctx.textBaseline='alphabetic';
       if(darkBg){ctx.shadowColor='rgba(0,0,0,.5)';ctx.shadowBlur=14;ctx.fillStyle='#FFFFFF';}
-      else ctx.fillStyle='#5C4633';
+      else ctx.fillStyle=schedSet().brown;
       ctx.font=F('400',40);
       ctx.fillText(String(y),W/2,166);
       ctx.font=F('800',88);
@@ -1946,13 +2060,14 @@ function genSchedule(y,m){
         rowH=Math.max(96,Math.floor((maxPanel-44-headH-footH-30)/rows));
         panelH=44+headH+rows*rowH+footH+30;
       }
-      /* 白色面板 */
-      ctx.fillStyle=darkBg?'rgba(247,247,252,.92)':'rgba(255,255,255,.66)';
+      /* 白色面板（透明度可調） */
+      const pAlpha=(opts.sched.panelAlpha!=null)?opts.sched.panelAlpha:0.92;
+      ctx.fillStyle=hexToRgba(darkBg?'#F7F7FC':'#FFFFFF',pAlpha);
       rr(ctx,px,py,pw,panelH,36); ctx.fill();
 
       const gx=px+34, gw=pw-68, colW=gw/7;
       const gy=py+44;
-      const SC=curSet();
+      const SC=schedSet();
       /* 星期列 */
       ctx.fillStyle=SC.brownSoft; ctx.font=F('700',26);
       ['MON','TUE','WED','THU','FRI','SAT','SUN'].forEach((t,i)=>{
@@ -1986,7 +2101,7 @@ function genSchedule(y,m){
         sl.slice(0,Math.max(slotFit,1)).forEach((t,i)=>{
           const sy=cy+58+i*40;
           if(taken.has(t)){
-            ctx.fillStyle=curSet().cover;
+            ctx.fillStyle=schedSet().cover;
             rr(ctx,cx-(colW-30)/2,sy-6,colW-30,30,15); ctx.fill();
           }else{
             ctx.fillStyle=SC.brown; ctx.font=F('400',27);
@@ -2005,11 +2120,9 @@ function genSchedule(y,m){
           fy+=44;
         });
       }
-      /* 輸出 */
-      const a=document.createElement('a');
-      a.href=cv.toDataURL('image/png');
-      a.download='pulipuli-'+y+'-'+pad(m+1)+'-預約表.png';
-      a.click();
+      /* 產生後彈出成品預覽，確認再下載 */
+      const url=cv.toDataURL('image/png');
+      openSchedPreview(url,'pulipuli-'+y+'-'+pad(m+1)+'-預約表.png');
       done(true);
     }catch(e){done(false);toast('產生失敗，請再試一次');}
   };
@@ -2030,11 +2143,11 @@ function genSchedule(y,m){
   }else start();
 
   function paintDefault(){
-    ctx.fillStyle=resolvedBg();
+    ctx.fillStyle=schedSet().cream;
     ctx.fillRect(0,0,W,H);
     /* 可愛的柔色圓點裝飾 */
     const deco=[[120,140,90],[940,120,70],[180,1750,110],[900,1800,85],[70,900,60],[1010,1000,65],[540,60,45],[990,1860,40],[60,1500,50]];
-    const cols=curSet().deco;
+    const cols=schedSet().deco;
     deco.forEach((p,i)=>{
       ctx.globalAlpha=.18;
       ctx.fillStyle=cols[i%cols.length];
@@ -2047,13 +2160,44 @@ function genSchedule(y,m){
 let schedY=today.getFullYear(), schedM=today.getMonth();
 $('#schedPrev').onclick=()=>{schedM--;if(schedM<0){schedM=11;schedY--;}renderSchedPage();};
 $('#schedNext').onclick=()=>{schedM++;if(schedM>11){schedM=0;schedY++;}renderSchedPage();};
+let _spDataUrl='',_spName='';
+function openSchedPreview(url,name){
+  _spDataUrl=url; _spName=name;
+  $('#spImg').src=url;
+  $('#schedPrevModal').classList.add('show');
+  $('#schedPrevMask').classList.add('show');
+}
+function closeSchedPreview(){
+  $('#schedPrevModal').classList.remove('show');
+  $('#schedPrevMask').classList.remove('show');
+}
 $('#schedBtn').onclick=()=>genSchedule(schedY,schedM);
+$('#spClose').onclick=closeSchedPreview;
+$('#spBack').onclick=closeSchedPreview;
+$('#schedPrevMask').onclick=closeSchedPreview;
+$('#spDownload').onclick=()=>{
+  const a=document.createElement('a');
+  a.href=_spDataUrl; a.download=_spName; a.click();
+  toast('已下載預約表 🖼️');
+  closeSchedPreview();
+};
 
-$('#schedCfgT').onclick=()=>{$('#schedCfgT').classList.toggle('open');$('#schedCfgBody').classList.toggle('open');};
+$('#ceCancel').onclick=()=>closeColorEditor(false);
+$('#ceSave').onclick=()=>closeColorEditor(true);
+$('#colorEditorMask').onclick=()=>closeColorEditor(false);
+$('#schedCfgT').onclick=()=>{$('#schedCfgT').classList.toggle('open');$('#schedCfgBody').classList.toggle('open');renderSchedPage();};
 function renderSchedPage(){
   $('#schedTitle').textContent=schedY+'年'+(schedM+1)+'月 預約表';
   renderSchedCfg();
   const box=$('#schedPreview'); box.innerHTML='';
+  const cfgOpen=$('#schedCfgBody')&&$('#schedCfgBody').classList.contains('open');
+  const tag=$('#schedPreviewTag');
+  if(tag)tag.textContent=cfgOpen?'👀 即時預覽 · 跟著下方「預約表配色」設定變動':'';
+  const SS=cfgOpen?schedSet():curSet();
+  box.style.setProperty('--milk',SS.milk);
+  box.style.setProperty('--bk-main',SS.bk);
+  box.style.setProperty('--brown-2',SS.brown2);
+  box.style.setProperty('--brown-soft',SS.brownSoft);
   const first=new Date(schedY,schedM,1);
   const offset=(first.getDay()+6)%7;
   const days=new Date(schedY,schedM+1,0).getDate();
@@ -2074,7 +2218,7 @@ function renderSchedPage(){
     const ds=schedY+'-'+pad(schedM+1)+'-'+pad(d);
     let inner='<div style="font-weight:800;font-size:11px;margin-bottom:2px">'+d+'</div>';
     if(isOffDay(ds)){
-      inner+='<div style="color:#C9A176">休</div>';
+      inner+='<div style="color:var(--bk-main)">休</div>';
     }else{
       const sl=effSlots(ds);
       const taken=takenSlots(ds,sl);
@@ -2128,7 +2272,7 @@ $('#schedBgFile').onchange=e=>{
 /* ===== 報表匯出成圖片（自繪 canvas，顏色不失真） ===== */
 $('#repExport').onclick=async()=>{
   const btn=$('#repExport');
-  btn.disabled=true; btn.textContent='產生圖片中…';
+  btn.disabled=true; btn.textContent='產生預覽中…';
   try{ await exportReport(); toast('已匯出報表圖片 🖼️'); }
   catch(e){ toast('匯出失敗，請再試一次'); }
   btn.disabled=false; btn.textContent='🖼️ 把這頁報表匯出成圖片';
@@ -2145,7 +2289,7 @@ async function exportReport(){
     ]);}catch(e){}
   }
   const FONT=(famKey?'"'+famKey+'",':'')+'"PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif';
-  const FS=(famKey==='ChenYuluoyan')?1.18:1;
+  const FS=(famKey==='ChenYuluoyan')?1.28:1;
   const F=(wgt,px)=>wgt+' '+Math.round(px*FS)+'px '+FONT;
 
   /* —— 與報表頁相同的計算 —— */
@@ -2186,7 +2330,7 @@ async function exportReport(){
   /* —— 版面 —— */
   const W=1080,PAD=56,CW=W-PAD*2;
   const SET=curSet();
-  const BROWN=theme.textBody||SET.ink, BROWN2=SET.brown2, SOFT=SET.brownSoft;
+  const BROWN=SET.ink, BROWN2=SET.brown2, SOFT=SET.brownSoft;
   const hCardA=(inSum+exSum)>0?400:200;
   const hCardB=250;
   const hCardC=svcTotal>0?(330+svcData.length*0):200;
@@ -2427,79 +2571,77 @@ $('#logoFile').onchange=e=>{
 };
 
 /* ===== 外觀分頁 ===== */
+function allSets(){
+  const arr=[];
+  Object.keys(THEME_SETS).forEach(k=>arr.push({id:k,builtin:true,data:THEME_SETS[k]}));
+  customSets().forEach(c=>arr.push({id:c.id,builtin:false,data:c}));
+  return arr;
+}
 function buildLookTab(body){
-  /* —— 主題配色 SET —— */
+  /* —— 主題配色 SET 選擇 —— */
   const tp=document.createElement('div'); tp.className='blk';
   tp.innerHTML='<div class="blk-t">主題配色</div>'+
-    '<div class="note-mini" style="margin:0 0 8px">顏色與字體會跟著雲端同步到其他裝置；背景圖因檔案較大只存在本機。</div>';
+    '<div class="note-mini" style="margin:0 0 8px">點一下套用；自訂配色會跟著雲端同步。內建兩套唯讀，想改請用「複製成新配色」。</div>';
   const setRow=document.createElement('div');
   setRow.style.cssText='display:flex;gap:10px;flex-wrap:wrap';
+  const swatch=c=>'<span style="width:18px;height:18px;border-radius:50%;background:'+c+';border:1.5px solid rgba(255,255,255,.7)"></span>';
   const renderSets=()=>{
     setRow.innerHTML='';
-    Object.keys(THEME_SETS).forEach(key=>{
-      const S=THEME_SETS[key];
-      const on=theme.set===key;
-      const b=document.createElement('button');
-      b.style.cssText='flex:1;min-width:150px;border-radius:var(--r-md);padding:12px;text-align:left;'+
-        'background:'+S.cream+';border:3px solid '+(on?'var(--btn)':'var(--line)')+';'+
-        'box-shadow:'+(on?'0 0 0 3px rgba(131,135,195,.25)':'var(--shadow-sm)');
+    allSets().forEach(item=>{
+      const S=item.data, on=theme.set===item.id;
+      const b=document.createElement('div');
+      b.style.cssText='flex:1;min-width:150px;border-radius:var(--r-md);padding:12px;'+
+        'background:'+S.cream+';border:3px solid '+(on?S.btn:'var(--line)')+';'+
+        'box-shadow:'+(on?'0 0 0 3px rgba(131,135,195,.25)':'var(--shadow-sm)')+';cursor:pointer';
       const lite=btnTextColor(S.cream)==='#FFF9F2';
-      b.innerHTML='<div style="font-weight:800;font-size:14px;color:'+(lite?'#FFF9F2':S.brown)+'">'+S.name+(on?'　✓':'')+'</div>'+
-        '<div style="display:flex;gap:5px;margin-top:8px">'+
-        [S.btn,S.brown,S.brownSoft,S.milk].map(c=>'<span style="width:20px;height:20px;border-radius:50%;background:'+c+';border:1.5px solid rgba(255,255,255,.7)"></span>').join('')+
-        '</div>';
-      b.onclick=()=>{
-        theme.set=key;
-        theme.color='';theme.btn='';theme.textTitle='';theme.textBody='';
-        saveTheme(); applyTheme(); renderSets(); openSettings();
-        toast('主題：'+S.name);
+      const editIcon=item.builtin?'':'<span class="set-edit" data-id="'+item.id+'" title="編輯這套配色" style="cursor:pointer;display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;background:rgba(255,255,255,.35);border:1.5px solid rgba(255,255,255,.7);font-size:13px;flex:none">✎</span>';
+      b.innerHTML='<div style="display:flex;align-items:center;gap:4px;font-weight:800;font-size:14px;color:'+(lite?'#FFF9F2':S.brown)+'"><span style="flex:1">'+esc(S.name)+(on?'　✓':'')+'</span>'+editIcon+'</div>'+
+        '<div style="display:flex;gap:5px;margin-top:8px">'+[S.btn,S.brown,S.brownSoft,S.bk,S.milk].map(swatch).join('')+'</div>';
+      b.onclick=(e)=>{
+        if(e.target.classList&&e.target.classList.contains('set-edit')){
+          theme.set=item.id;saveTheme();applyTheme();openColorEditor(item.id);return;
+        }
+        theme.set=item.id;saveTheme();applyTheme();renderSets();toast('主題：'+S.name);
       };
       setRow.appendChild(b);
     });
   };
   renderSets();
   tp.appendChild(setRow);
+
+  const btnRow=document.createElement('div'); btnRow.className='btn-row'; btnRow.style.marginTop='12px';
+  const dup=document.createElement('button'); dup.className='mini-btn solid'; dup.textContent='＋ 複製目前配色來編輯';
+  dup.onclick=()=>{
+    const src=curSet();
+    const mine=JSON.parse(JSON.stringify(src));
+    mine.id='c_'+uid();
+    mine.name=(src.name||'配色').replace(/（預設）/,'')+' 副本';
+    opts.look.customSets=customSets().concat([mine]);
+    theme.set=mine.id; saveTheme(); applyTheme();
+    openColorEditor(mine.id);
+  };
+  btnRow.appendChild(dup);
+  /* 若目前選的是自訂 SET，給編輯／刪除 */
+  const cur=customSets().find(c=>c.id===theme.set);
+  if(cur){
+    const ed=document.createElement('button'); ed.className='mini-btn'; ed.textContent='✎ 編輯';
+    ed.onclick=()=>openColorEditor(cur.id);
+    const del=document.createElement('button'); del.className='mini-btn'; del.textContent='🗑 刪除';
+    del.onclick=()=>{
+      if(!confirm('確定刪除「'+cur.name+'」配色？'))return;
+      opts.look.customSets=customSets().filter(c=>c.id!==cur.id);
+      theme.set='dark'; saveTheme(); applyTheme(); openSettings();
+      toast('已刪除配色');
+    };
+    btnRow.appendChild(ed); btnRow.appendChild(del);
+  }
+  tp.appendChild(btnRow);
   body.appendChild(tp);
-
-  /* —— 進階自訂（覆寫 SET 的單一顏色） —— */
-  const adv=document.createElement('div'); adv.className='blk';
-  const advT=document.createElement('button'); advT.className='fold-t';
-  advT.innerHTML='<span>🎨 進階自訂顏色</span><span class="arr">▾</span>';
-  const advB=document.createElement('div'); advB.className='fold-body';
-  advT.onclick=()=>{advT.classList.toggle('open');advB.classList.toggle('open');};
-  adv.appendChild(advT); adv.appendChild(advB);
-
-  const S=curSet();
-  const rows=[
-    ['color','背景顏色',S.cream],
-    ['btn','按鈕底色',S.btn],
-    ['textTitle','標題文字顏色',S.ink],
-    ['textBody','內文文字顏色',S.ink]
-  ];
-  rows.forEach(([key,label,defc])=>{
-    const row=document.createElement('div');
-    row.style.cssText='display:flex;align-items:center;gap:10px;padding:8px 2px;border-bottom:1px solid var(--line)';
-    const cur=theme[key]||defc;
-    const lab=document.createElement('span');
-    lab.style.cssText='flex:1;font-size:13px;font-weight:700';
-    lab.textContent=label+(theme[key]?'（已自訂）':'');
-    const wrap=document.createElement('label');
-    wrap.style.cssText='width:32px;height:32px;border-radius:50%;background:'+cur+';border:2px solid var(--line);cursor:pointer;overflow:hidden;position:relative;flex:none';
-    const ci=document.createElement('input');
-    ci.type='color'; ci.value=cur;
-    ci.style.cssText='position:absolute;inset:0;opacity:0;cursor:pointer';
-    ci.oninput=()=>{theme[key]=ci.value;saveTheme();applyTheme();wrap.style.background=ci.value;lab.textContent=label+'（已自訂）';};
-    wrap.appendChild(ci);
-    const rs=document.createElement('button'); rs.className='mini-btn'; rs.textContent='恢復';
-    rs.onclick=()=>{theme[key]='';saveTheme();applyTheme();openSettings();toast(label+'已恢復預設');};
-    row.appendChild(lab); row.appendChild(wrap); row.appendChild(rs);
-    advB.appendChild(row);
-  });
-  body.appendChild(adv);
 
   /* —— 背景圖 —— */
   const ap=document.createElement('div'); ap.className='blk';
-  ap.innerHTML='<div class="blk-t">背景圖</div>';
+  ap.innerHTML='<div class="blk-t">背景圖</div>'+
+    '<div class="note-mini" style="margin:0 0 8px">背景圖因檔案較大只存在這台裝置，不會雲端同步。</div>';
   const bgRow=document.createElement('div'); bgRow.className='btn-row';
   const bUp=document.createElement('button'); bUp.className='mini-btn'; bUp.textContent='🖼️ 上傳背景圖';
   bUp.onclick=()=>$('#bgFile').click();
@@ -2512,17 +2654,34 @@ function buildLookTab(body){
   ap.appendChild(bgRow);
   body.appendChild(ap);
 
+  /* —— 卡片透明度 —— */
+  const op=document.createElement('div'); op.className='blk';
+  op.innerHTML='<div class="blk-t">卡片透明度</div>'+
+    '<div class="note-mini" style="margin:0 0 8px">調低可讓白色卡片半透明，透出背景圖。</div>';
+  const oRow=document.createElement('div'); oRow.style.cssText='display:flex;align-items:center;gap:12px';
+  const oSld=document.createElement('input'); oSld.type='range'; oSld.min='30'; oSld.max='100'; oSld.step='5';
+  oSld.value=String(Math.round(((opts.look&&opts.look.cardAlpha!=null)?opts.look.cardAlpha:1)*100));
+  oSld.style.flex='1';
+  const oVal=document.createElement('span'); oVal.style.cssText='font-size:13px;font-weight:700;min-width:42px;text-align:right';
+  oVal.textContent=oSld.value+'%';
+  oSld.oninput=()=>{oVal.textContent=oSld.value+'%';opts.look.cardAlpha=parseInt(oSld.value)/100;applyTheme();};
+  oSld.onchange=()=>{saveTheme();};
+  oRow.appendChild(oSld); oRow.appendChild(oVal); op.appendChild(oRow);
+  body.appendChild(op);
+
   /* —— 字體 —— */
   const fp=document.createElement('div'); fp.className='blk';
   fp.innerHTML='<div class="blk-t">字體</div>'+
     '<div class="note-mini" style="margin:0 0 8px">會套用在整個 App 和產生的圖片上（需要網路載入字體，離線時用系統字體）。</div>';
   ensureFontCss();
   const fw=document.createElement('div'); fw.className='chips';
+  const SYS_STACK='-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang TC","Microsoft JhengHei",sans-serif';
   FONT_OPTIONS.forEach(([fam,name])=>{
     const ch=document.createElement('button');
     ch.className='chip'+((theme.font||'system')===fam?' on':'');
     ch.textContent=name;
-    if(fam!=='system')ch.style.fontFamily='"'+fam+'",sans-serif';
+    /* 每顆 chip 固定用「自己代表的字體」顯示，當作預覽，不跟著當前選用字體變動 */
+    ch.style.fontFamily=(fam==='system')?SYS_STACK:('"'+fam+'",'+SYS_STACK);
     ch.onclick=()=>{theme.font=fam;saveTheme();applyTheme();openSettings();toast('字體：'+name);};
     fw.appendChild(ch);
   });
@@ -2530,7 +2689,109 @@ function buildLookTab(body){
   body.appendChild(fp);
 }
 
-/* ===== 預約表設定（在預約表頁的折疊區） ===== */
+/* ===== 配色編輯器（全螢幕） ===== */
+let editId=null, editDraft=null;
+let editSource='look';
+function openColorEditor(id,source){
+  editId=id; editSource=source||'look';
+  const c=customSets().find(x=>x.id===id);
+  if(!c){toast('找不到配色');return;}
+  editDraft=JSON.parse(JSON.stringify(c));
+  renderColorEditor();
+  $('#colorEditor').classList.add('show');
+  $('#colorEditorMask').classList.add('show');
+}
+function closeColorEditor(save){
+  if(save){
+    const arr=customSets().map(c=>c.id===editId?editDraft:c);
+    opts.look.customSets=arr; saveOpts(); scheduleSync();
+    toast('已儲存配色 ✨');
+  }
+  const src=editSource;
+  editId=null; editDraft=null;
+  $('#colorEditor').classList.remove('show');
+  $('#colorEditorMask').classList.remove('show');
+  applyTheme();
+  if(src==='sched'){ if($('#pageSched').classList.contains('show')||true){ renderSchedPage(); } }
+  openSettings();
+}
+function renderColorEditor(){
+  const wrap=$('#colorEditorBody');
+  wrap.innerHTML='';
+  /* 名稱 */
+  const nf=document.createElement('div'); nf.className='field';
+  nf.innerHTML='<label>配色名稱</label>';
+  const ni=document.createElement('input'); ni.type='text'; ni.className='inline-input wide';
+  ni.value=editDraft.name||'我的配色';
+  ni.oninput=()=>{editDraft.name=ni.value;};
+  nf.appendChild(ni); wrap.appendChild(nf);
+
+  /* 第一層：五色快速生成 */
+  const q=document.createElement('div'); q.className='blk';
+  q.innerHTML='<div class="blk-t">🎨 五色快速生成</div>'+
+    '<div class="note-mini" style="margin:0 0 10px">調這 5 個主色，下方整套會自動重算（會覆蓋你的細部微調）：</div>';
+  const fiveDefs=[['cream','背景'],['btn','按鈕'],['ink','文字'],['brownSoft','弱化字'],['bk','點綴色']];
+  const fiveRow=document.createElement('div');
+  fiveRow.style.cssText='display:flex;gap:14px;flex-wrap:wrap';
+  fiveDefs.forEach(([k,label])=>{
+    const cell=document.createElement('div');
+    cell.style.cssText='display:flex;flex-direction:column;align-items:center;gap:5px';
+    const sw=document.createElement('label');
+    sw.style.cssText='width:46px;height:46px;border-radius:12px;border:2px solid var(--line);background:'+editDraft[k]+';position:relative;overflow:hidden;cursor:pointer';
+    const ci=document.createElement('input'); ci.type='color'; ci.value=editDraft[k];
+    ci.style.cssText='position:absolute;inset:0;opacity:0;cursor:pointer';
+    const hx=document.createElement('input'); hx.type='text';
+    hx.value=editDraft[k]; hx.maxLength=7;
+    hx.style.cssText='width:74px;font-size:11px;text-align:center;padding:3px 4px;border:1px solid var(--line);border-radius:6px;font-family:monospace';
+    ci.oninput=()=>{editDraft[k]=ci.value.toUpperCase();sw.style.background=ci.value;hx.value=editDraft[k];};
+    hx.onchange=()=>{const n=normHex(hx.value);if(n){editDraft[k]=n;sw.style.background=n;ci.value=n;hx.value=n;}else{hx.value=editDraft[k];toast('色碼格式請用 #9F353A');}};
+    sw.appendChild(ci); cell.appendChild(sw);
+    const t=document.createElement('span'); t.textContent=label; t.style.fontSize='12px';
+    cell.appendChild(t); cell.appendChild(hx);
+    fiveRow.appendChild(cell);
+  });
+  q.appendChild(fiveRow);
+  const genBtn=document.createElement('button'); genBtn.className='mini-btn solid'; genBtn.style.marginTop='12px';
+  genBtn.textContent='✨ 用這 5 色重算整套';
+  genBtn.onclick=()=>{
+    const g=genSetFrom5(editDraft.cream,editDraft.btn,editDraft.ink,editDraft.brownSoft,editDraft.bk);
+    Object.assign(editDraft,g);
+    applyTheme(editDraft); renderColorEditor();
+    toast('已重算整套配色');
+  };
+  q.appendChild(genBtn);
+  wrap.appendChild(q);
+
+  /* 第二層：進階逐項 */
+  TOKEN_GROUPS.forEach(([gname,toks])=>{
+    const blk=document.createElement('div'); blk.className='blk';
+    const t=document.createElement('button'); t.className='fold-t';
+    t.innerHTML='<span>'+gname+'</span><span class="arr">▾</span>';
+    const bd=document.createElement('div'); bd.className='fold-body';
+    t.onclick=()=>{t.classList.toggle('open');bd.classList.toggle('open');};
+    toks.forEach(([k,label])=>{
+      const row=document.createElement('div');
+      row.style.cssText='display:flex;align-items:center;gap:10px;padding:8px 2px;border-bottom:1px solid var(--line)';
+      const lab=document.createElement('span'); lab.style.cssText='flex:1;font-size:13px;font-weight:700';
+      lab.textContent=label;
+      const code=document.createElement('input'); code.type='text'; code.maxLength=7;
+      code.value=editDraft[k];
+      code.style.cssText='width:80px;font-size:11px;text-align:center;padding:4px;border:1px solid var(--line);border-radius:6px;font-family:monospace';
+      const w2=document.createElement('label');
+      w2.style.cssText='width:32px;height:32px;border-radius:8px;background:'+editDraft[k]+';border:2px solid var(--line);cursor:pointer;overflow:hidden;position:relative;flex:none';
+      const ci=document.createElement('input'); ci.type='color'; ci.value=editDraft[k];
+      ci.style.cssText='position:absolute;inset:0;opacity:0;cursor:pointer';
+      ci.oninput=()=>{editDraft[k]=ci.value.toUpperCase();w2.style.background=ci.value;code.value=ci.value.toUpperCase();applyTheme(editDraft);};
+      code.onchange=()=>{const n=normHex(code.value);if(n){editDraft[k]=n;w2.style.background=n;ci.value=n;code.value=n;applyTheme(editDraft);}else{code.value=editDraft[k];toast('色碼格式請用 #9F353A');}};
+      w2.appendChild(ci);
+      row.appendChild(lab); row.appendChild(code); row.appendChild(w2);
+      bd.appendChild(row);
+    });
+    blk.appendChild(t); blk.appendChild(bd);
+    wrap.appendChild(blk);
+  });
+}
+
 function renderSchedCfg(){
   const body=$('#schedCfgBody'); if(!body)return;
   body.innerHTML='';
@@ -2574,17 +2835,75 @@ function renderSchedCfg(){
   fb.appendChild(fTa);
   body.appendChild(fb);
 
+  /* 預約表配色 */
+  const cp=document.createElement('div'); cp.className='blk';
+  cp.innerHTML='<div class="blk-t">預約表配色</div>'+
+    '<div class="note-mini" style="margin:0 0 8px">預設跟著外觀主題；也可以指定一套配色，讓對外的預約表用不同色調：</div>';
+  const cw=document.createElement('div'); cw.className='chips';
+  const setOpts=[['inherit','跟隨外觀']].concat(
+    Object.keys(THEME_SETS).map(k=>[k,THEME_SETS[k].name]),
+    customSets().map(c=>[c.id,c.name])
+  );
+  setOpts.forEach(([id,name])=>{
+    const ch=document.createElement('button');
+    ch.className='chip'+((opts.sched.themeSet||'inherit')===id?' on':'');
+    ch.textContent=name;
+    ch.onclick=()=>{opts.sched.themeSet=id;saveSched();renderSchedCfg();renderSchedPage();toast('預約表配色：'+name);};
+    cw.appendChild(ch);
+  });
+  cp.appendChild(cw);
+
+  /* 進階：複製一套來高度客製，或編輯目前選用的自訂配色 */
+  const cpBtns=document.createElement('div'); cpBtns.className='btn-row'; cpBtns.style.marginTop='10px';
+  const dupSched=document.createElement('button'); dupSched.className='mini-btn solid';
+  dupSched.textContent='＋ 複製一套來進階調整';
+  dupSched.onclick=()=>{
+    const src=schedSet();
+    const mine=JSON.parse(JSON.stringify(src));
+    mine.id='c_'+uid();
+    mine.name=(src.name||'配色').replace(/（預設）/,'')+'（預約表）';
+    opts.look.customSets=customSets().concat([mine]);
+    opts.sched.themeSet=mine.id;
+    saveSched(); saveOpts();
+    openColorEditor(mine.id,'sched');
+  };
+  cpBtns.appendChild(dupSched);
+  const curSched=customSets().find(c=>c.id===opts.sched.themeSet);
+  if(curSched){
+    const edS=document.createElement('button'); edS.className='mini-btn'; edS.textContent='✎ 編輯這套';
+    edS.onclick=()=>openColorEditor(curSched.id,'sched');
+    cpBtns.appendChild(edS);
+  }
+  cp.appendChild(cpBtns);
+  body.appendChild(cp);
+
+  /* 預約表面板透明度 */
+  const pa=document.createElement('div'); pa.className='blk';
+  pa.innerHTML='<div class="blk-t">預約表面板透明度</div>'+
+    '<div class="note-mini" style="margin:0 0 8px">調低可讓中央白色面板半透明，透出背景。</div>';
+  const paRow=document.createElement('div'); paRow.style.cssText='display:flex;align-items:center;gap:12px';
+  const paSld=document.createElement('input'); paSld.type='range'; paSld.min='30'; paSld.max='100'; paSld.step='5';
+  paSld.value=String(Math.round(((opts.sched.panelAlpha!=null)?opts.sched.panelAlpha:0.92)*100));
+  paSld.style.flex='1';
+  const paVal=document.createElement('span'); paVal.style.cssText='font-size:13px;font-weight:700;min-width:42px;text-align:right';
+  paVal.textContent=paSld.value+'%';
+  paSld.oninput=()=>{paVal.textContent=paSld.value+'%';opts.sched.panelAlpha=parseInt(paSld.value)/100;};
+  paSld.onchange=()=>{saveSched();renderSchedPage();};
+  paRow.appendChild(paSld); paRow.appendChild(paVal); pa.appendChild(paRow);
+  body.appendChild(pa);
+
   /* 預約表字體 */
   const ft=document.createElement('div'); ft.className='blk';
   ft.innerHTML='<div class="blk-t">預約表字體</div>'+
     '<div class="note-mini" style="margin:0 0 8px">只影響產生的圖片，不影響 App 介面：</div>';
   ensureFontCss();
   const fw=document.createElement('div'); fw.className='chips';
+  const SYS_STACK2='-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang TC","Microsoft JhengHei",sans-serif';
   [['inherit','跟隨外觀字體']].concat(FONT_OPTIONS).forEach(([fam,name])=>{
     const ch=document.createElement('button');
     ch.className='chip'+((opts.sched.font||'inherit')===fam?' on':'');
     ch.textContent=name;
-    if(fam!=='system'&&fam!=='inherit')ch.style.fontFamily='"'+fam+'",sans-serif';
+    ch.style.fontFamily=(fam==='system'||fam==='inherit')?SYS_STACK2:('"'+fam+'",'+SYS_STACK2);
     ch.onclick=()=>{opts.sched.font=fam;saveSched();renderSchedCfg();toast('預約表字體：'+name);};
     fw.appendChild(ch);
   });
