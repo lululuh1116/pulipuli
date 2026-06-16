@@ -70,7 +70,7 @@ header.app{
 }
 .brand-row{display:flex;align-items:center;justify-content:space-between}
 .brand{display:flex;align-items:center;gap:10px}
-.brand .brand-text{display:flex;align-items:baseline;gap:8px;min-width:0}
+.brand .brand-text{display:flex;align-items:baseline;gap:8px;min-width:0;flex-wrap:wrap}
 #brandLogo{
   width:44px;height:44px;border-radius:50%;flex:none;
   background:var(--btn) center/contain no-repeat;color:var(--btn-text);
@@ -82,7 +82,7 @@ header.app{
 .brand h1{font-size:18px;font-weight:800;letter-spacing:.04em;color:var(--on-bg,var(--ink-title))}
 .brand .sub{font-size:11px;color:var(--on-bg-soft,var(--brown-soft))}
 .head-actions{display:flex;align-items:center;gap:10px}
-.sync-dot{width:8px;height:8px;border-radius:50%;background:#CFC4B5;display:inline-block}
+.sync-dot{width:12px;height:12px;background:#CFC4B5;display:inline-block;clip-path:polygon(50% 0%,62% 38%,100% 50%,62% 62%,50% 100%,38% 62%,0% 50%,38% 38%)}
 .sync-dot.ok{background:#9DBB8F}
 .sync-dot.busy{background:var(--accent);animation:pulse 1s infinite}
 .sync-dot.err{background:var(--red)}
@@ -637,7 +637,7 @@ function ensureSched(){
     if((opts.look.textBody||'').toUpperCase()==='#0A1123')opts.look.textBody='';
     dirty=true;
   }
-  if(!opts.sched.font)opts.sched.font='inherit';
+  if(!opts.sched.font||opts.sched.font==='inherit')opts.sched.font='system';
   if(!opts.sched.themeSet)opts.sched.themeSet='inherit';
   if(opts.sched.panelAlpha==null)opts.sched.panelAlpha=0.92;
   if(opts.look&&opts.look.cardAlpha==null)opts.look.cardAlpha=1;
@@ -1479,7 +1479,7 @@ function blk(title){
 function incomeTotal(){
   let sub=0;
   if(inSel.base)sub+=inSel.base.price;
-  else{const mo=parseFloat(inSel.monthly);if(!isNaN(mo)&&mo>0)sub+=mo;}
+  else{const mo=parseFloat(inSel.monthly);if(!isNaN(mo)&&mo>=0)sub+=mo;}
   inSel.addons.forEach(a=>sub+=a.price);
   const ex=parseFloat(inSel.extra);
   if(!isNaN(ex)&&ex>0)sub+=ex;
@@ -1509,7 +1509,8 @@ function updateFoot(){
     lab.textContent='顧客支付金額';
     val.textContent=money(incomeTotal());
     val.classList.remove('ex'); ok.classList.remove('ex');
-    ok.disabled=!inSel.base&&!(parseFloat(inSel.monthly)>0);
+    const hasAny=inSel.base||inSel.monthly!==''||inSel.addons.length>0||inSel.removal||inSel.freeRemoval||inSel.pct||(inSel.extra&&parseFloat(inSel.extra)>0);
+    ok.disabled=!hasAny;
   }else if(entryMode==='expense'){
     lab.textContent='本筆採購總費用';
     val.textContent=money(calcTotal());
@@ -1910,9 +1911,11 @@ $('#okBtn').onclick=()=>{
   if(entryMode==='income'){
     const mo=parseFloat(inSel.monthly);
     const baseObj=inSel.base?{name:inSel.base.name,price:inSel.base.price}
-      :((!isNaN(mo)&&mo>0)?{name:'當月優惠款',price:mo}:null);
-    if(!baseObj)return;
-    const items=[baseObj.name].concat(inSel.addons.map(a=>a.name));
+      :((!isNaN(mo)&&mo>=0&&inSel.monthly!=='')?{name:'當月優惠款',price:mo}:null);
+    const hasAny=baseObj||inSel.addons.length>0||inSel.removal||inSel.freeRemoval||inSel.pct||(inSel.extra&&parseFloat(inSel.extra)>0);
+    if(!hasAny)return;
+    const baseName=baseObj?baseObj.name:(inSel.removal?inSel.removal.name:(inSel.freeRemoval?'新客免費卸甲':'其他'));
+    const items=[baseName].concat(inSel.addons.map(a=>a.name));
     if(inSel.removal)items.push(inSel.removal.name);
     const dParts=[];
     if(inSel.pct)dParts.push(Math.round(inSel.pct*100)/10+'折');
@@ -1924,7 +1927,7 @@ $('#okBtn').onclick=()=>{
     save({
       type:'income', date:editDate, amount:incomeTotal(), items:items,
       breakdown:{
-        base:baseObj,
+        base:baseObj||{name:baseName,price:0},
         addons:inSel.addons.map(a=>({name:a.name,price:a.price}))
           .concat((!isNaN(ex)&&ex>0)?[{name:'款式加價',price:ex}]:[]),
         removal:inSel.removal?{name:inSel.removal.name,price:inSel.freeRemoval?0:inSel.removal.price}:null
@@ -2017,7 +2020,7 @@ function genSchedule(y,m){
     btn.disabled=false; btn.textContent='產生本月 IG 預約表預覽圖';
     if(ok)toast('預覽已產生，確認後下載 🖼️');
   };
-  const schedFam=(opts.sched.font&&opts.sched.font!=='inherit')?opts.sched.font:theme.font;
+  const schedFam=(opts.sched.font&&opts.sched.font!=='system')?opts.sched.font:null;
   const drawBody=hasImg=>{
     try{
       const fam=(schedFam&&schedFam!=='system')?'"'+schedFam+'",':'';
@@ -2198,6 +2201,14 @@ function renderSchedPage(){
   box.style.setProperty('--bk-main',SS.bk);
   box.style.setProperty('--brown-2',SS.brown2);
   box.style.setProperty('--brown-soft',SS.brownSoft);
+  /* 字體預覽：設定展開時跟預約表字體，收起跟 App */
+  const previewFont=cfgOpen?(opts.sched.font&&opts.sched.font!=='system'?opts.sched.font:null):null;
+  if(previewFont){
+    ensureFontCss();
+    box.style.fontFamily='"'+previewFont+'","PingFang TC","Noto Sans TC",sans-serif';
+  }else{
+    box.style.fontFamily='';
+  }
   const first=new Date(schedY,schedM,1);
   const offset=(first.getDay()+6)%7;
   const days=new Date(schedY,schedM+1,0).getDate();
@@ -2899,11 +2910,11 @@ function renderSchedCfg(){
   ensureFontCss();
   const fw=document.createElement('div'); fw.className='chips';
   const SYS_STACK2='-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang TC","Microsoft JhengHei",sans-serif';
-  [['inherit','跟隨外觀字體']].concat(FONT_OPTIONS).forEach(([fam,name])=>{
+  FONT_OPTIONS.forEach(([fam,name])=>{
     const ch=document.createElement('button');
-    ch.className='chip'+((opts.sched.font||'inherit')===fam?' on':'');
+    ch.className='chip'+((opts.sched.font||'system')===fam?' on':'');
     ch.textContent=name;
-    ch.style.fontFamily=(fam==='system'||fam==='inherit')?SYS_STACK2:('"'+fam+'",'+SYS_STACK2);
+    ch.style.fontFamily=(fam==='system')?SYS_STACK2:('"'+fam+'",'+SYS_STACK2);
     ch.onclick=()=>{opts.sched.font=fam;saveSched();renderSchedCfg();toast('預約表字體：'+name);};
     fw.appendChild(ch);
   });
