@@ -53,6 +53,10 @@ button:focus-visible{outline:2px solid var(--accent-deep);outline-offset:2px}
 
 .page>.note-mini{color:var(--on-bg-soft,var(--brown-soft))}
 
+.combo-input{display:inline-flex;align-items:stretch;border:1.5px solid var(--line);border-radius:999px;overflow:hidden;background:var(--card);box-shadow:var(--shadow-sm)}
+.combo-input input{border:none!important;box-shadow:none!important;border-radius:0!important;background:transparent!important;margin:0!important;outline:none!important}
+.combo-input input:first-child{border-right:1.5px solid var(--line)!important}
+.combo-input input:focus{background:var(--milk)!important}
 .sched-preview-tag{font-size:11px;color:var(--brown-soft);background:var(--milk);border-radius:999px;padding:5px 12px;display:inline-block;margin-bottom:12px}
 /* ===== RWD：網頁版單純加寬，排版與手機相同 ===== */
 @media(min-width:768px){
@@ -257,7 +261,7 @@ main{padding:14px 16px 120px;max-width:560px;margin:0 auto}
 .blk .blk-t{font-size:13px;font-weight:700;color:var(--brown-2);margin-bottom:8px}
 .chips{display:flex;flex-wrap:wrap;gap:8px}
 .chip{
-  padding:8px 14px;border-radius:14px;font-size:13.5px;font-weight:600;
+  padding:8px 16px;border-radius:999px;font-size:13.5px;font-weight:600;
   background:var(--card);box-shadow:var(--shadow-sm);color:var(--brown-2);
   transition:background .15s,color .15s;
 }
@@ -1296,7 +1300,7 @@ function renderRep(){
 
 /* ========= 記帳 Bottom Sheet ========= */
 let entryMode='income';
-let inSel={base:null,addons:[],extra:'',removal:null,freeRemoval:false,pct:null,fixed:null,custom:'',note:'',customer:'',monthly:''};
+let inSel={base:null,addons:[],extra:'',extraName:'',removal:null,freeRemoval:false,pct:null,fixed:null,custom:'',note:'',customer:'',monthly:'',monthlyName:''};
 let exSel={cat:Object.keys(opts.expCats)[0],items:[],other:'',note:''};
 let calcExpr='';
 let editingId=null;   /* 正在編輯的紀錄 id；null 表示新增 */
@@ -1340,7 +1344,7 @@ function effSlots(ds){
 }
 
 function resetForms(){
-  inSel={base:null,addons:[],extra:'',removal:null,freeRemoval:false,pct:null,fixed:null,custom:'',note:'',customer:'',monthly:''};
+  inSel={base:null,addons:[],extra:'',extraName:'',removal:null,freeRemoval:false,pct:null,fixed:null,custom:'',note:'',customer:'',monthly:'',monthlyName:''};
   exSel={cat:Object.keys(opts.expCats)[0],items:[],other:'',note:''};
   bkSel={name:'',time:'',channel:'',channelOther:'',plans:[],planNote:'',deposit:''};
   calcExpr='';
@@ -1429,11 +1433,11 @@ function prefillIncome(r){
   if(bd.base){
     const hit=findBy(opts.base,bd.base);
     if(hit)inSel.base=hit;
-    else if(bd.base.name==='當月優惠款')inSel.monthly=String(bd.base.price);
+    else if(!findBy(opts.base,bd.base)){inSel.monthly=String(bd.base.price);inSel.monthlyName=(bd.base.name==='當月優惠款')?'':bd.base.name;}
     else inSel.base={id:'x_'+uid(),name:bd.base.name,price:bd.base.price};
   }
   (bd.addons||[]).forEach(a=>{
-    if(a.name==='款式加價'){inSel.extra=String(a.price);return;}
+    if(a.isExtra||a.name==='款式加價'){inSel.extra=String(a.price);inSel.extraName=(a.name==='款式加價')?'':a.name;return;}
     inSel.addons.push(findBy(opts.addon,a)||{id:'x_'+uid(),name:a.name,price:a.price});
   });
   if(bd.removal){
@@ -1454,7 +1458,7 @@ function prefillExpense(r){
   const known=opts.expCats[cat]||[];
   const items=[],others=[];
   (r.items||[]).forEach(n=>known.includes(n)?items.push(n):others.push(n));
-  inSel={base:null,addons:[],extra:'',removal:null,freeRemoval:false,pct:null,fixed:null,custom:'',note:'',customer:'',monthly:''};
+  inSel={base:null,addons:[],extra:'',extraName:'',removal:null,freeRemoval:false,pct:null,fixed:null,custom:'',note:'',customer:'',monthly:'',monthlyName:''};
   exSel={cat:cat,items:items,other:others.join('、'),note:r.note||''};
   calcExpr=String(r.amount);
 }
@@ -1620,17 +1624,24 @@ function renderIncome(body){
       inSel.base=null; renderEntryBody();
     }));
   }
+  const miWrap=document.createElement('div');
+  miWrap.className='combo-input';
+  const miName=document.createElement('input');
+  miName.type='text'; miName.placeholder='優惠項目（可留空）'; miName.className='inline-input';
+  miName.style.width='160px'; miName.value=inSel.monthlyName||'';
+  miName.oninput=()=>{inSel.monthlyName=miName.value;};
   const mi=document.createElement('input');
   mi.type='number'; mi.inputMode='numeric';
-  mi.placeholder='當月優惠款（自填金額）'; mi.className='inline-input';
-  mi.style.width='210px'; mi.value=inSel.monthly||'';
+  mi.placeholder='金額'; mi.className='inline-input';
+  mi.style.width='100px'; mi.value=inSel.monthly||'';
   mi.oninput=()=>{
     inSel.monthly=mi.value;
     if(mi.value)inSel.base=null;
     updateFoot();
   };
   mi.onchange=()=>{if(inSel.monthly)renderEntryBody();};
-  b1.chips.appendChild(mi);
+  miWrap.appendChild(miName); miWrap.appendChild(mi);
+  b1.chips.appendChild(miWrap);
   body.appendChild(b1.wrap);
 
   /* 加價項目（複選） */
@@ -1648,11 +1659,19 @@ function renderIncome(body){
       inSel.addons=inSel.addons.filter(x=>x.id!==a.id); renderEntryBody();
     }));
   });
+  const xiWrap=document.createElement('div');
+  xiWrap.className='combo-input';
+  const xiName=document.createElement('input');
+  xiName.type='text'; xiName.placeholder='加價項目（可留空）'; xiName.className='inline-input';
+  xiName.style.width='160px'; xiName.value=inSel.extraName||'';
+  xiName.oninput=()=>{inSel.extraName=xiName.value;};
   const xi=document.createElement('input');
-  xi.type='number'; xi.inputMode='numeric'; xi.placeholder='款式加價（補差額）';
-  xi.className='inline-input'; xi.style.width='190px'; xi.value=inSel.extra;
+  xi.type='number'; xi.inputMode='numeric'; xi.placeholder='補差額';
+  xi.className='inline-input'; xi.style.width='100px'; xi.value=inSel.extra;
   xi.oninput=()=>{inSel.extra=xi.value;updateFoot();};
-  b2.chips.appendChild(xi);
+  xi.onchange=()=>{if(inSel.extra)renderEntryBody();};
+  xiWrap.appendChild(xiName); xiWrap.appendChild(xi);
+  b2.chips.appendChild(xiWrap);
   body.appendChild(b2.wrap);
 
   /* 卸甲續作（單選） */
@@ -1919,7 +1938,7 @@ $('#okBtn').onclick=()=>{
   if(entryMode==='income'){
     const mo=parseFloat(inSel.monthly);
     const baseObj=inSel.base?{name:inSel.base.name,price:inSel.base.price}
-      :((!isNaN(mo)&&mo>=0&&inSel.monthly!=='')?{name:'當月優惠款',price:mo}:null);
+      :((!isNaN(mo)&&mo>=0&&inSel.monthly!=='')?{name:(inSel.monthlyName.trim()||'當月優惠款'),price:mo}:null);
     const hasAny=baseObj||inSel.addons.length>0||inSel.removal||inSel.freeRemoval||inSel.pct||(inSel.extra&&parseFloat(inSel.extra)>0);
     if(!hasAny)return;
     const baseName=baseObj?baseObj.name:(inSel.removal?inSel.removal.name:(inSel.freeRemoval?'新客免費卸甲':'其他'));
@@ -1937,7 +1956,7 @@ $('#okBtn').onclick=()=>{
       breakdown:{
         base:baseObj||{name:baseName,price:0},
         addons:inSel.addons.map(a=>({name:a.name,price:a.price}))
-          .concat((!isNaN(ex)&&ex>0)?[{name:'款式加價',price:ex}]:[]),
+          .concat((!isNaN(ex)&&ex>0)?[{name:(inSel.extraName.trim()||'款式加價'),price:ex,isExtra:true}]:[]),
         removal:inSel.removal?{name:inSel.removal.name,price:inSel.freeRemoval?0:inSel.removal.price}:null
       },
       discount:dParts.length?{label:dParts.join('・'),pct:inSel.pct,fixed:inSel.fixed||0,custom:isNaN(c)?0:c}:null,
