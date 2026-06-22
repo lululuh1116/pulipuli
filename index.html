@@ -982,7 +982,8 @@ function recTitle(r){
   if(r.type==='income'){
     const base=r.breakdown&&r.breakdown.base?r.breakdown.base.name:'收入';
     const extra=(r.breakdown&&r.breakdown.addons&&r.breakdown.addons.length)?'＋'+r.breakdown.addons.length+'項加價':'';
-    return base+extra;
+    const bkT=r.bkTime?'🕒'+r.bkTime+' ':'';
+    return bkT+base+extra;
   }
   return r.category||'支出';
 }
@@ -1348,6 +1349,10 @@ function resetForms(){
 function openEntry(rec){
   editingId=rec?rec.id:null;
   editDate=rec?rec.date:selDate;
+  /* 編輯結帳過的收入時，保留其原預約時段資訊；其他情況清空 */
+  checkoutBkInfo=(rec&&rec.type==='income'&&rec.bkTime)
+    ?{bkTime:rec.bkTime,bkDate:rec.date,bkName:rec.customer||'',bkChannel:rec.bkChannel||''}
+    :null;
   if(rec){
     entryMode=rec.type;
     if(rec.type==='income')prefillIncome(rec);
@@ -1364,11 +1369,14 @@ function openEntry(rec){
 }
 
 /* 預約 → 結帳：打開收入表單並帶入客人資訊，存檔後原預約直接轉成收入紀錄 */
+let checkoutBkInfo=null;
 function openCheckout(bk){
   editingId=bk.id;
   editDate=bk.date;
   entryMode='income';
   resetForms();
+  /* 記住原預約的時段，結帳後仍要佔用該時段、可回查 */
+  checkoutBkInfo={bkTime:bk.time||'',bkDate:bk.date,bkName:bk.name,bkChannel:bk.channel||''};
   const plans=bk.plans||(bk.plan?[bk.plan]:[]);
   plans.forEach(p=>{
     const b=opts.base.find(o=>o.name===p.name);
@@ -1934,9 +1942,13 @@ $('#okBtn').onclick=()=>{
       },
       discount:dParts.length?{label:dParts.join('・'),pct:inSel.pct,fixed:inSel.fixed||0,custom:isNaN(c)?0:c}:null,
       note:inSel.note.trim(),
-      customer:inSel.customer||''
+      customer:inSel.customer||'',
+      bkTime:(checkoutBkInfo&&checkoutBkInfo.bkTime)||'',
+      bkChannel:(checkoutBkInfo&&checkoutBkInfo.bkChannel)||'',
+      fromBooking:!!checkoutBkInfo
     });
     toast(wasEditing?'已更新紀錄 '+money(incomeTotal()):'已記錄收入 '+money(incomeTotal()));
+    checkoutBkInfo=null;
   }else if(entryMode==='expense'){
     const amt=calcTotal();
     if(amt<=0)return;
@@ -2001,8 +2013,8 @@ function drawCover(ctx,img,W,H){
 function takenSlots(ds,slots){
   const toMin=t=>{const m=/^(\d{1,2}):(\d{2})$/.exec(t);return m?(+m[1])*60+(+m[2]):null;};
   const taken=new Set();
-  live().filter(r=>r.type==='booking'&&r.date===ds&&r.time).forEach(b=>{
-    const bm=toMin(b.time); if(bm==null)return;
+  live().filter(r=>r.date===ds&&((r.type==='booking'&&r.time)||(r.type==='income'&&r.bkTime))).forEach(b=>{
+    const bm=toMin(b.time||b.bkTime); if(bm==null)return;
     let best=null,bd=1e9;
     slots.forEach(sl=>{const d=Math.abs(toMin(sl)-bm);if(d<bd){bd=d;best=sl;}});
     if(best!=null&&bd<90)taken.add(best);
