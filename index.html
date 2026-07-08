@@ -1452,14 +1452,20 @@ function prefillBooking(r){
 function prefillIncome(r){
   const bd=r.breakdown||{};
   const findBy=(arr,it)=>arr.find(o=>o.name===it.name&&o.price===it.price)||arr.find(o=>o.name===it.name);
-  inSel={base:null,addons:[],extra:'',removal:null,freeRemoval:false,pct:null,fixed:null,custom:'',note:r.note||'',customer:r.customer||'',monthly:''};
+  /* [FIX] 補上 extraName、monthlyName，避免編輯後按 OK 時 undefined.trim() 閃退 */
+  inSel={base:null,addons:[],extra:'',extraName:'',removal:null,freeRemoval:false,pct:null,fixed:null,custom:'',note:r.note||'',customer:r.customer||'',monthly:'',monthlyName:''};
   exSel={cat:Object.keys(opts.expCats)[0],items:[],other:'',note:''};
   calcExpr='';
   if(bd.base){
-    const hit=findBy(opts.base,bd.base);
-    if(hit)inSel.base=hit;
-    else if(!findBy(opts.base,bd.base)){inSel.monthly=String(bd.base.price);inSel.monthlyName=(bd.base.name==='當月優惠款')?'':bd.base.name;}
-    else inSel.base={id:'x_'+uid(),name:bd.base.name,price:bd.base.price};
+    /* [FIX] 原本的 else-if 條件與 hit 重複，第三分支永遠不會執行；
+       改為：優惠款（isMonthly 旗標或舊資料名稱判斷）回填優惠欄位，
+       其餘服務找不到清單時顯示「（已停用）」chip 保留原價 */
+    if(bd.base.isMonthly||bd.base.name==='當月優惠款'){
+      inSel.monthly=String(bd.base.price);
+      inSel.monthlyName=(bd.base.name==='當月優惠款')?'':bd.base.name;
+    }else{
+      inSel.base=findBy(opts.base,bd.base)||{id:'x_'+uid(),name:bd.base.name,price:bd.base.price};
+    }
   }
   (bd.addons||[]).forEach(a=>{
     if(a.isExtra||a.name==='款式加價'){inSel.extra=String(a.price);inSel.extraName=(a.name==='款式加價')?'':a.name;return;}
@@ -1962,8 +1968,9 @@ $('#okBtn').onclick=()=>{
   const save=rec=>{ if(wasEditing)updateRecord(wasEditing,rec); else addRecord(rec); };
   if(entryMode==='income'){
     const mo=parseFloat(inSel.monthly);
+    /* [FIX] monthlyName/extraName 加 (||'') 防呆，優惠款加 isMonthly 旗標供編輯時辨識 */
     const baseObj=inSel.base?{name:inSel.base.name,price:inSel.base.price}
-      :((!isNaN(mo)&&mo>=0&&inSel.monthly!=='')?{name:(inSel.monthlyName.trim()||'當月優惠款'),price:mo}:null);
+      :((!isNaN(mo)&&mo>=0&&inSel.monthly!=='')?{name:((inSel.monthlyName||'').trim()||'當月優惠款'),price:mo,isMonthly:true}:null);
     const hasAny=baseObj||inSel.addons.length>0||inSel.removal||inSel.freeRemoval||inSel.pct||(inSel.extra&&parseFloat(inSel.extra)>0);
     if(!hasAny)return;
     const baseName=baseObj?baseObj.name:(inSel.removal?inSel.removal.name:(inSel.freeRemoval?'新客免費卸甲':'其他'));
@@ -1981,7 +1988,7 @@ $('#okBtn').onclick=()=>{
       breakdown:{
         base:baseObj||{name:baseName,price:0},
         addons:inSel.addons.map(a=>({name:a.name,price:a.price}))
-          .concat((!isNaN(ex)&&ex>0)?[{name:(inSel.extraName.trim()||'款式加價'),price:ex,isExtra:true}]:[]),
+          .concat((!isNaN(ex)&&ex>0)?[{name:((inSel.extraName||'').trim()||'款式加價'),price:ex,isExtra:true}]:[]),
         removal:inSel.removal?{name:inSel.removal.name,price:inSel.freeRemoval?0:inSel.removal.price}:null
       },
       discount:dParts.length?{label:dParts.join('・'),pct:inSel.pct,fixed:inSel.fixed||0,custom:isNaN(c)?0:c}:null,
@@ -2112,7 +2119,9 @@ function genSchedule(y,m){
       const px=64,pw=W-128,py=330;
       const headH=64;
       let rowH=66+maxSl*42;
-      const footH=footerLines.length?56+footerLines.length*44:20;
+      /* [FIX] 說明文字行高改跟著字體縮放係數 FS，辰宇落雁體才不會被裁到 */
+      const footLH=Math.round(44*FS);
+      const footH=footerLines.length?56+footerLines.length*footLH:20;
       let panelH=44+headH+rows*rowH+footH+30;
       const maxPanel=H-py-60;
       if(panelH>maxPanel){
@@ -2174,9 +2183,10 @@ function genSchedule(y,m){
         let fy=gy+headH+rows*rowH+58;
         footerLines.forEach((line,i)=>{
           ctx.fillStyle=i===0?SC.brown:SC.brown2;
-          ctx.font=(i===0?'700 30px ':'400 26px ')+FONT;
+          /* [FIX] 改用 F() 讓說明文字也吃到字體縮放（原本寫死 px 不會放大） */
+          ctx.font=i===0?F('700',30):F('400',26);
           ctx.fillText(line,gx+10,fy);
-          fy+=44;
+          fy+=footLH;
         });
       }
       /* 產生後彈出成品預覽，確認再下載 */
@@ -2251,7 +2261,11 @@ function renderSchedPage(){
   const box=$('#schedPreview'); box.innerHTML='';
   const cfgOpen=$('#schedCfgBody')&&$('#schedCfgBody').classList.contains('open');
   const tag=$('#schedPreviewTag');
-  if(tag)tag.textContent=cfgOpen?'👀 即時預覽 · 跟著下方「預約表配色」設定變動':'';
+  /* [FIX] 收起設定時把標籤整個隱藏，不然空膠囊（padding＋底色）會殘留在角落 */
+  if(tag){
+    tag.textContent=cfgOpen?'👀 即時預覽 · 跟著下方「預約表配色」設定變動':'';
+    tag.style.display=cfgOpen?'inline-block':'none';
+  }
   const SS=cfgOpen?schedSet():curSet();
   box.style.setProperty('--milk',SS.milk);
   box.style.setProperty('--bk-main',SS.bk);
@@ -2400,7 +2414,8 @@ async function exportReport(){
   const BROWN=SET.ink, BROWN2=SET.brown2, SOFT=SET.brownSoft;
   const hCardA=(inSum+exSum)>0?400:200;
   const hCardB=250;
-  const hCardC=svcTotal>0?(330+svcData.length*0):200;
+  /* [FIX] 服務佔比卡片高度改依項目數計算，6 個項目時圖例才不會爆出卡片 */
+  const hCardC=svcTotal>0?Math.max(370,140+svcData.length*46):200;
   const hCardD=330;
   const hCardE=110+(vips.length?vips.length*56:60);
   const heights=[hCardA,hCardB,hCardC,hCardD,hCardE];
