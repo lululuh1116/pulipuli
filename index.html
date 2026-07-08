@@ -523,6 +523,13 @@ main{padding:14px 16px 120px;max-width:560px;margin:0 auto}
   </div>
 </div>
 
+<div class="sheet-mask" id="custMask" style="z-index:59"></div>
+<div class="sheet" id="custSheet" role="dialog" aria-label="客人資料" style="z-index:60">
+  <div class="sheet-grip"></div>
+  <div class="sheet-head"><h3 id="custTitle" style="text-align:center;font-size:15px;font-weight:800"></h3></div>
+  <div class="sheet-body" id="custBody"></div>
+</div>
+
 <div class="toast" id="toast"></div>
 <input type="file" id="importFile" accept=".json,application/json" style="display:none">
 <input type="file" id="bgFile" accept="image/*" style="display:none">
@@ -615,6 +622,8 @@ function ensureSched(){
   /* 店家基本資料 */
   if(!opts.store){opts.store={name:'PuliPuli.Studio',logo:''};dirty=true;}
   if(opts.store.logo==null)opts.store.logo='';
+  /* [NEW] 客人備註（甲床狀況、喜好…），跟著雲端同步 */
+  if(!opts.custNotes){opts.custNotes={};dirty=true;}
   /* v6：App 字體改為只存本機，從同步資料移除 */
   if(opts.look&&opts.look.font){
     try{
@@ -680,7 +689,11 @@ let opts=loadJSON(LS_OPT,null)||JSON.parse(JSON.stringify(DEFAULT_OPTS));
 let syncCfg=loadJSON(LS_SYNC,{token:'',gistId:'',last:0});
 
 function loadJSON(k,fb){try{const v=localStorage.getItem(k);return v?JSON.parse(v):fb}catch(e){return fb}}
-function saveRecords(){localStorage.setItem(LS_REC,JSON.stringify(records))}
+/* [NEW] 儲存空間滿時（背景圖佔用過多）不再靜默失敗，明確警告使用者 */
+function saveRecords(){
+  try{localStorage.setItem(LS_REC,JSON.stringify(records))}
+  catch(e){toast('⚠️ 儲存空間已滿，紀錄可能沒存到！請到設定移除背景圖後重試')}
+}
 function saveOpts(){opts.updatedAt=Date.now();localStorage.setItem(LS_OPT,JSON.stringify(opts))}
 function saveSync(){localStorage.setItem(LS_SYNC,JSON.stringify(syncCfg))}
 const live=()=>records.filter(r=>!r.deleted);
@@ -1188,6 +1201,18 @@ $$('#pageRep .pill[data-per]').forEach(b=>b.onclick=()=>{
   renderRep();
 });
 const pieColors=()=>curSet().pie;
+/* [NEW] 服務佔比只列前 5 名，其餘彙總成「其他」——自填的優惠款名稱太多會讓圓餅碎掉 */
+function groupTopSvc(data,n){
+  if(data.length<=n+1)return data;
+  const top=data.slice(0,n);
+  const rest=data.slice(n);
+  top.push({
+    label:'其他（'+rest.length+' 項）',
+    value:rest.reduce((s,d)=>s+d.value,0),
+    color:curSet().brownSoft
+  });
+  return top;
+}
 
 function periodFilter(){
   const y=repDate.getFullYear(),m=repDate.getMonth();
@@ -1261,9 +1286,35 @@ function renderRep(){
   /* 客單價 */
   const visits=rs.filter(r=>r.type==='income').length;
   const avg=visits?Math.round(inSum/visits):0;
+  /* [NEW] 同期比較：與上一期（前一日／月／年）的收入與來客數對照 */
+  const pd=new Date(repDate);
+  if(repPer==='day')pd.setDate(pd.getDate()-1);
+  else if(repPer==='month')pd.setMonth(pd.getMonth()-1);
+  else pd.setFullYear(pd.getFullYear()-1);
+  let ptest,plabel;
+  {
+    const y2=pd.getFullYear(),m2=pd.getMonth();
+    if(repPer==='day'){const ds2=fmtD(pd);ptest=r=>r.date===ds2;plabel=(m2+1)+'/'+pd.getDate();}
+    else if(repPer==='year'){const p2=y2+'-';ptest=r=>r.date.startsWith(p2);plabel=y2+'年';}
+    else{const p2=y2+'-'+pad(m2+1);ptest=r=>r.date.startsWith(p2);plabel=(m2+1)+'月';}
+  }
+  const prs=live().filter(ptest);
+  const pIn=prs.filter(r=>r.type==='income').reduce((s,r)=>s+r.amount,0);
+  const pV=prs.filter(r=>r.type==='income').length;
+  const cmp=(cur,prev,isMoney)=>{
+    const d=cur-prev;
+    if(d===0)return '<b style="color:var(--brown-soft)">持平</b>';
+    const arrow=d>0?'▲':'▼';
+    const col=d>0?'var(--in-deep,var(--brown))':'var(--red)';
+    const pct=prev>0?('（'+(d>0?'+':'')+Math.round(d/prev*100)+'%）'):'';
+    return '<b style="color:'+col+'">'+arrow+' '+(isMoney?money(Math.abs(d)):Math.abs(d)+' 位')+pct+'</b>';
+  };
   $('#repAvg').innerHTML=
     '<div class="kpi"><span class="big">'+money(avg)+'</span><span class="unit">/ 人（'+esc(per.label)+'）</span></div>'+
-    '<div class="kpi-sub"><span>總收入 <b>'+money(inSum)+'</b></span><span>來客數 <b>'+visits+' 位</b></span></div>';
+    '<div class="kpi-sub"><span>總收入 <b>'+money(inSum)+'</b></span><span>來客數 <b>'+visits+' 位</b></span></div>'+
+    ((pIn>0||pV>0||inSum>0||visits>0)
+      ?'<div class="kpi-sub" style="margin-top:6px"><span>vs '+esc(plabel)+'：收入 '+cmp(inSum,pIn,true)+'</span><span>來客 '+cmp(visits,pV,false)+'</span></div>'
+      :'');
 
   /* 服務佔比 */
   const svcMap={};
@@ -1272,8 +1323,9 @@ function renderRep(){
     const name=r.breakdown&&r.breakdown.base?r.breakdown.base.name:'其他';
     svcMap[name]=(svcMap[name]||0)+r.amount;
   });
-  const svcData=Object.keys(svcMap).map((k,i)=>({label:k,value:svcMap[k],color:pieColors()[i%pieColors().length]}))
-    .sort((a,b)=>b.value-a.value);
+  const svcData=groupTopSvc(
+    Object.keys(svcMap).map((k,i)=>({label:k,value:svcMap[k],color:pieColors()[i%pieColors().length]}))
+      .sort((a,b)=>b.value-a.value),5);
   const svcTotal=svcData.reduce((s,d)=>s+d.value,0);
   $('#repSvc').innerHTML=pieSVG(svcData)+(svcTotal>0?legendHTML(svcData,svcTotal):'');
 
@@ -1314,14 +1366,79 @@ function renderRep(){
   const medals=['🥇','🥈','🥉'];
   $('#repVip').innerHTML=vips.length
     ? vips.map((v,i)=>
-        '<div style="display:flex;align-items:center;gap:10px;padding:8px 2px;border-bottom:1px solid var(--line);font-size:14px">'+
+        '<div data-cust="'+esc(v.name)+'" style="display:flex;align-items:center;gap:10px;padding:8px 2px;border-bottom:1px solid var(--line);font-size:14px;cursor:pointer">'+
         '<span style="width:26px;text-align:center">'+(medals[i]||(i+1))+'</span>'+
-        '<span style="flex:1;font-weight:700">'+esc(v.name)+'</span>'+
+        '<span style="flex:1;font-weight:700">'+esc(v.name)+((opts.custNotes&&opts.custNotes[v.name])?' 📝':'')+'</span>'+
         '<span style="color:var(--brown-soft);font-size:12px">'+v.n+' 次</span>'+
         '<span style="font-weight:700;color:var(--accent-deep)">'+money(v.sum)+'</span>'+
-        '</div>').join('')
+        '</div>').join('')+
+        '<div class="note-mini" style="text-align:center;margin-top:6px">點一下客人可看備註與款式歷史 📖</div>'
     : '<div class="empty" style="color:var(--brown-soft);font-size:13px;text-align:center;padding:14px 0">還沒有資料——用「預約 → 結帳」記下的收入會自動帶客人名字進來 💖</div>';
+  /* [NEW] 點常客 → 開啟客人備註／歷史 */
+  $('#repVip').querySelectorAll('[data-cust]').forEach(el=>{
+    el.onclick=()=>openCustomer(el.dataset.cust);
+  });
 }
+
+/* ========= [NEW] 客人備註／款式歷史 ========= */
+function openCustomer(name){
+  $('#custTitle').textContent='💖 '+name;
+  const body=$('#custBody'); body.innerHTML='';
+
+  /* 備註（雲端同步） */
+  const nb=document.createElement('div'); nb.className='blk';
+  nb.innerHTML='<div class="blk-t">客人備註</div>'+
+    '<div class="note-mini" style="margin:0 0 6px">甲床狀況、喜好色系、注意事項…會跟著雲端同步：</div>';
+  const ta=document.createElement('textarea');
+  ta.className='inline-input wide'; ta.rows=3;
+  ta.style.cssText='width:100%;resize:vertical;line-height:1.6';
+  ta.value=(opts.custNotes&&opts.custNotes[name])||'';
+  ta.onchange=()=>{
+    if(!opts.custNotes)opts.custNotes={};
+    if(ta.value.trim())opts.custNotes[name]=ta.value.trim();
+    else delete opts.custNotes[name];
+    saveOpts(); scheduleSync(); toast('已儲存備註 📝');
+  };
+  nb.appendChild(ta); body.appendChild(nb);
+
+  /* 款式歷史（收入＋未結帳預約） */
+  const hb=document.createElement('div'); hb.className='blk';
+  hb.innerHTML='<div class="blk-t">款式歷史</div>';
+  const hist=live().filter(r=>{
+    if(r.type==='income'){
+      if(r.customer===name)return true;
+      if(!r.customer&&r.note){const m=/客人：([^・]+)/.exec(r.note);if(m&&m[1].trim()===name)return true;}
+      return false;
+    }
+    if(r.type==='booking')return r.name===name;
+    return false;
+  }).sort((a,b)=>b.date.localeCompare(a.date));
+  if(!hist.length){
+    const emp=document.createElement('div'); emp.className='note-mini';
+    emp.textContent='還沒有紀錄——預約結帳後會自動累積在這裡';
+    hb.appendChild(emp);
+  }else{
+    hist.slice(0,30).forEach(r=>{
+      const row=document.createElement('div');
+      row.style.cssText='display:flex;gap:10px;padding:8px 2px;border-bottom:1px dashed var(--line);font-size:13px;align-items:baseline';
+      const isBook=r.type==='booking';
+      row.innerHTML='<span style="color:var(--brown-soft);white-space:nowrap">'+r.date.slice(2)+'</span>'+
+        '<span style="flex:1;min-width:0">'+esc(isBook?'📅 尚未結帳・'+recSub(r):recTitle(r))+'</span>'+
+        (isBook?'':'<b style="white-space:nowrap">'+money(r.amount)+'</b>');
+      hb.appendChild(row);
+    });
+    const ins=hist.filter(r=>r.type==='income');
+    const sumRow=document.createElement('div');
+    sumRow.className='note-mini';
+    sumRow.style.marginTop='8px';
+    sumRow.textContent='共來 '+ins.length+' 次・累積消費 '+money(ins.reduce((s,r)=>s+r.amount,0))+(hist.length>30?'（僅顯示最近 30 筆）':'');
+    hb.appendChild(sumRow);
+  }
+  body.appendChild(hb);
+
+  $('#custMask').classList.add('show'); $('#custSheet').classList.add('show');
+}
+$('#custMask').onclick=()=>{$('#custMask').classList.remove('show');$('#custSheet').classList.remove('show');};
 
 /* ========= 記帳 Bottom Sheet ========= */
 let entryMode='income';
@@ -1418,6 +1535,8 @@ function openCheckout(bk){
     inSel.addons.push({id:'x_'+uid(),name:p.name,price:p.price});
   });
   inSel.customer=bk.name;
+  /* [NEW] 訂金帳務閉環：記住已收訂金，底部即時顯示「現場應收」 */
+  inSel.depositPaid=(bk.deposit>0)?bk.deposit:0;
   const parts=['客人：'+bk.name];
   if(bk.channel)parts.push(bk.channel+'預約');
   if(bk.deposit>0)parts.push('訂金已付$'+bk.deposit);
@@ -1549,7 +1668,11 @@ function calcTotal(){
 function updateFoot(){
   const lab=$('#footLab'),val=$('#footVal'),ok=$('#okBtn');
   if(entryMode==='income'){
-    lab.textContent='顧客支付金額';
+    /* [NEW] 有訂金的結帳：金額仍記全額（訂金也是收入），但明確標示現場應收多少 */
+    const dep0=inSel.depositPaid||0;
+    lab.textContent=dep0>0
+      ?('合計金額｜已收訂金 $'+dep0+'・現場應收 '+money(Math.max(0,incomeTotal()-dep0)))
+      :'顧客支付金額';
     val.textContent=money(incomeTotal());
     val.classList.remove('ex'); ok.classList.remove('ex');
     const hasAny=inSel.base||inSel.monthly!==''||inSel.addons.length>0||inSel.removal||inSel.freeRemoval||inSel.pct||(inSel.extra&&parseFloat(inSel.extra)>0);
@@ -1584,6 +1707,14 @@ function renderBooking(body){
   ni.type='text'; ni.placeholder='例：布丁狗'; ni.className='inline-input wide'; ni.value=bkSel.name;
   ni.oninput=()=>{bkSel.name=ni.value;updateFoot();};
   b0.chips.appendChild(ni);
+  /* [NEW] 查看這位客人的備註與款式歷史 */
+  const hbtn=document.createElement('button'); hbtn.className='mini-btn'; hbtn.textContent='📖 備註／歷史';
+  hbtn.onclick=()=>{
+    const n=bkSel.name.trim();
+    if(!n){toast('先輸入客人名字');return;}
+    openCustomer(n);
+  };
+  b0.chips.appendChild(hbtn);
   body.appendChild(b0.wrap);
 
   /* 預約時間 */
@@ -2386,8 +2517,9 @@ async function exportReport(){
     const name=r.breakdown&&r.breakdown.base?r.breakdown.base.name:'其他';
     svcMap[name]=(svcMap[name]||0)+r.amount;
   });
-  const svcData=Object.keys(svcMap).map((k,i)=>({label:k,value:svcMap[k],color:pieColors()[i%pieColors().length]}))
-    .sort((a,b)=>b.value-a.value).slice(0,6);
+  const svcData=groupTopSvc(
+    Object.keys(svcMap).map((k,i)=>({label:k,value:svcMap[k],color:pieColors()[i%pieColors().length]}))
+      .sort((a,b)=>b.value-a.value),5);
   const svcTotal=svcData.reduce((s,d)=>s+d.value,0);
   const yNow=repDate.getFullYear();
   const counts=Array(12).fill(0);
@@ -3140,6 +3272,12 @@ function mergeRecords(a,b){
   });
   return Object.values(map);
 }
+/* [NEW] 已刪除超過 90 天的紀錄真正移除，避免資料與同步 payload 無限長大。
+   保留 90 天的墓碑是為了讓其他裝置有充分時間同步到「已刪除」狀態 */
+function purgeDeleted(arr){
+  const cutoff=Date.now()-90*864e5;
+  return arr.filter(r=>!(r&&r.deleted&&(r.updatedAt||0)<cutoff));
+}
 function setSyncUI(state,msg){
   const dot=$('#syncDot');
   dot.className='sync-dot '+(state||'');
@@ -3161,12 +3299,14 @@ async function syncNow(manual){
   setSyncUI('busy','同步中…');
   try{
     let remote=null;
+    let remoteStamp=null; /* [NEW] 下載當下的雲端版本時間戳，上傳前用來偵測是否被別台裝置搶先更新 */
     /* 下載 */
     if(syncCfg.gistId){
       const res=await gh('GET','/gists/'+syncCfg.gistId);
       if(res.status===404){syncCfg.gistId='';saveSync();}
       else if(res.ok){
         const g=await res.json();
+        remoteStamp=g.updated_at;
         const f=g.files&&g.files[GIST_FILE];
         if(f){
           let content=f.content;
@@ -3186,6 +3326,7 @@ async function syncNow(manual){
           const res=await gh('GET','/gists/'+hit.id);
           if(res.ok){
             const g=await res.json();
+            remoteStamp=g.updated_at;
             const f=g.files[GIST_FILE];
             let content=f.content;
             if(f.truncated){const raw=await fetch(f.raw_url);content=await raw.text();}
@@ -3195,10 +3336,28 @@ async function syncNow(manual){
       }else throw new Error('權杖無效（'+ls.status+'）');
     }
     /* 合併 */
-    if(remote){
-      records=mergeRecords(records,remote.records||[]);
-      if(remote.opts&&(remote.opts.updatedAt||0)>(opts.updatedAt||0)){opts=remote.opts;ensureSched();loadThemeObj();applyTheme();}
+    const applyRemote=r2=>{
+      records=purgeDeleted(mergeRecords(records,r2.records||[]));
+      if(r2.opts&&(r2.opts.updatedAt||0)>(opts.updatedAt||0)){opts=r2.opts;ensureSched();loadThemeObj();applyTheme();}
       saveRecords(); localStorage.setItem(LS_OPT,JSON.stringify(opts));
+    };
+    if(remote)applyRemote(remote);
+    else records=purgeDeleted(records);
+    /* [NEW] 上傳前二次確認：若下載之後雲端又被別台裝置更新過，
+       先把對方的資料拉下來合併，避免整包覆蓋掉對方剛記的紀錄 */
+    if(syncCfg.gistId&&remoteStamp){
+      const chk=await gh('GET','/gists/'+syncCfg.gistId);
+      if(chk.ok){
+        const g3=await chk.json();
+        if(g3.updated_at!==remoteStamp){
+          const f3=g3.files&&g3.files[GIST_FILE];
+          if(f3){
+            let c3=f3.content;
+            if(f3.truncated){const raw=await fetch(f3.raw_url);c3=await raw.text();}
+            try{const r3=JSON.parse(c3);applyRemote(r3);}catch(e){}
+          }
+        }
+      }
     }
     /* 上傳 */
     const payload=JSON.stringify({records:records,opts:opts,syncedAt:new Date().toISOString()},null,1);
