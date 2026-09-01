@@ -614,8 +614,8 @@ const DEFAULT_OPTS={
     days:{},
     footer:'簡易款式$599，卸甲$100，手繪來圖報價。\n*暫不接延甲\n*不接病甲/傷甲\n*不開放攜伴\n*內有狗狗&倉鼠，害怕動物者請斟酌'
   },
-  /* 工作室抽成：每個品牌獨立設定；rate 以小數儲存（20% = 0.2），monthlyCap=null 表示無上限 */
-  commission:{enabled:false,rate:0,monthlyCap:null}
+  /* 工作室抽成：每個品牌獨立設定；rate=工作室預設抽成率；legacyRate=舊版收入的固定歷史率；monthlyCap=null 表示無上限 */
+  commission:{enabled:false,rate:0,legacyRate:0,monthlyCap:null}
 };
 /* 新品牌若不複製設定，就用這份空白版本：分類保留、項目全空 */
 function blankOpts(name){
@@ -626,8 +626,9 @@ function blankOpts(name){
     sched:{slots:['11:00','15:00','19:00'],days:{},footer:''},
     look:{set:'dark',customSets:[],cardAlpha:1},
     store:{name:name,logo:''},
-    commission:{enabled:false,rate:0,monthlyCap:null},
+    commission:{enabled:false,rate:0,legacyRate:0,monthlyCap:null},
     custNotes:{},
+    custCommission:{},
     mig_xiejia:true,mig3:true
   };
 }
@@ -670,17 +671,23 @@ function ensureSched(){
   /* 店家基本資料 */
   if(!opts.store){opts.store={name:'PuliPuli.Studio',logo:''};dirty=true;}
   if(opts.store.logo==null)opts.store.logo='';
-  /* 工作室抽成設定：舊品牌沒有欄位時一律視為關閉，不需要搬動任何既有收入紀錄 */
-  if(!opts.commission){opts.commission={enabled:false,rate:0,monthlyCap:null};dirty=true;}
+  /* 工作室抽成設定：rate 是新收入的預設值；legacyRate 固定舊版收入的歷史計算基準，避免之後改預設率而重算舊帳 */
+  if(!opts.commission){opts.commission={enabled:false,rate:0,legacyRate:0,monthlyCap:null};dirty=true;}
   if(opts.commission.enabled==null)opts.commission.enabled=false;
   if(typeof opts.commission.rate!=='number'||!isFinite(opts.commission.rate))opts.commission.rate=0;
   opts.commission.rate=Math.max(0,Math.min(1,opts.commission.rate));
+  if(typeof opts.commission.legacyRate!=='number'||!isFinite(opts.commission.legacyRate)){
+    opts.commission.legacyRate=opts.commission.enabled?opts.commission.rate:0; dirty=true;
+  }
+  opts.commission.legacyRate=Math.max(0,Math.min(1,opts.commission.legacyRate));
   if(opts.commission.monthlyCap!==null){
     const cc=Number(opts.commission.monthlyCap);
     opts.commission.monthlyCap=(isFinite(cc)&&cc>=0)?Math.round(cc):null;
   }
   /* [NEW] 客人備註（甲床狀況、喜好…），跟著雲端同步 */
   if(!opts.custNotes){opts.custNotes={};dirty=true;}
+  /* [NEW] 客人預設抽成率：key 沿用目前客人名稱識別，值為 0~1；沒有 key 就沿用工作室預設 */
+  if(!opts.custCommission){opts.custCommission={};dirty=true;}
   /* v6：App 字體改為只存本機，從同步資料移除 */
   if(opts.look&&opts.look.font){
     try{
@@ -808,6 +815,7 @@ function addBrand(name,copy){
   if(copy){
     o=JSON.parse(JSON.stringify(opts));
     o.custNotes={};
+    o.custCommission={};
     if(o.sched)o.sched.days={};   /* 公休與單日時段屬於原品牌，不複製 */
   }else{
     o=blankOpts(name);
@@ -1452,15 +1460,35 @@ function renderRec(){
 function commissionCfg(){
   const c=opts.commission||{};
   const rate=(typeof c.rate==='number'&&isFinite(c.rate))?Math.max(0,Math.min(1,c.rate)):0;
+  const legacyRate=(typeof c.legacyRate==='number'&&isFinite(c.legacyRate))?Math.max(0,Math.min(1,c.legacyRate)):(c.enabled?rate:0);
   let cap=null;
   if(c.monthlyCap!==null&&c.monthlyCap!==''&&c.monthlyCap!==undefined){
     const n=Number(c.monthlyCap);
     if(isFinite(n)&&n>=0)cap=Math.round(n);
   }
-  return {enabled:!!c.enabled,rate:rate,monthlyCap:cap};
+  return {enabled:!!c.enabled,rate:rate,legacyRate:legacyRate,monthlyCap:cap};
+}
+function customerCommissionRate(name){
+  const c=commissionCfg();
+  if(!c.enabled)return 0;
+  const n=String(name||'').trim();
+  if(n&&opts.custCommission&&Object.prototype.hasOwnProperty.call(opts.custCommission,n)){
+    const v=Number(opts.custCommission[n]);
+    if(isFinite(v))return Math.max(0,Math.min(1,v));
+  }
+  return c.rate;
+}
+function newIncomeCommissionRate(customer){return customerCommissionRate(customer);}
+/* 已存收入優先讀取該筆快照；舊版沒有 commissionRate 的收入固定用 legacyRate，不跟著未來預設率變動 */
+function recordCommissionRate(r){
+  if(r&&typeof r.commissionRate==='number'&&isFinite(r.commissionRate))return Math.max(0,Math.min(1,r.commissionRate));
+  return commissionCfg().legacyRate;
+}
+function incomeRecordsBetween(startDs,endDs){
+  return live().filter(r=>r.type==='income'&&r.date>=startDs&&r.date<=endDs);
 }
 function incomeSumBetween(startDs,endDs){
-  return live().filter(r=>r.type==='income'&&r.date>=startDs&&r.date<=endDs).reduce((s,r)=>s+r.amount,0);
+  return incomeRecordsBetween(startDs,endDs).reduce((sum,r)=>sum+r.amount,0);
 }
 function monthCommission(y,m,endDay){
   const c=commissionCfg();
@@ -1469,16 +1497,16 @@ function monthCommission(y,m,endDay){
   const d=(endDay==null)?last:Math.max(0,Math.min(last,endDay));
   if(d<=0)return {gross:0,raw:0,commission:0,net:0};
   const start=y+'-'+mm+'-01', end=y+'-'+mm+'-'+pad(d);
-  const gross=incomeSumBetween(start,end);
-  if(!c.enabled||c.rate<=0)return {gross:gross,raw:0,commission:0,net:gross};
-  const raw=Math.round(gross*c.rate);
+  const rs=incomeRecordsBetween(start,end);
+  const gross=rs.reduce((sum,r)=>sum+r.amount,0);
+  /* 報表以每筆已存的 commissionRate 為準；關閉開關只影響「之後新增」的收入，不抹掉歷史抽成 */
+  const raw=rs.reduce((sum,r)=>sum+Math.round(r.amount*recordCommissionRate(r)),0);
   const commission=c.monthlyCap==null?raw:Math.min(raw,c.monthlyCap);
   return {gross:gross,raw:raw,commission:commission,net:gross-commission};
 }
 /* 期間抽成：月＝該月；年＝逐月套上限再加總；日＝該日造成的「本月累積抽成增量」 */
 function commissionForReport(){
   const c=commissionCfg();
-  if(!c.enabled)return {enabled:false,commission:0,monthToDate:0,cap:c.monthlyCap,rate:c.rate};
   const y=repDate.getFullYear(),m=repDate.getMonth();
   if(repPer==='year'){
     let commission=0,gross=0;
@@ -1486,18 +1514,19 @@ function commissionForReport(){
       const x=monthCommission(y,i);
       commission+=x.commission; gross+=x.gross;
     }
-    return {enabled:true,commission:commission,gross:gross,net:gross-commission,monthToDate:null,cap:c.monthlyCap,rate:c.rate};
+    return {enabled:c.enabled||commission>0,commission:commission,gross:gross,net:gross-commission,monthToDate:null,cap:c.monthlyCap,rate:c.rate};
   }
   if(repPer==='month'){
     const x=monthCommission(y,m);
-    return {enabled:true,commission:x.commission,gross:x.gross,net:x.net,monthToDate:x.commission,cap:c.monthlyCap,rate:c.rate};
+    return {enabled:c.enabled||x.commission>0,commission:x.commission,gross:x.gross,net:x.net,monthToDate:x.commission,cap:c.monthlyCap,rate:c.rate};
   }
   const d=repDate.getDate();
   const cur=monthCommission(y,m,d);
   const prev=monthCommission(y,m,d-1);
+  const delta=Math.max(0,cur.commission-prev.commission);
   return {
-    enabled:true,
-    commission:Math.max(0,cur.commission-prev.commission),
+    enabled:c.enabled||cur.commission>0,
+    commission:delta,
     gross:null,
     net:null,
     monthToDate:cur.commission,
@@ -1734,6 +1763,25 @@ function openCustomer(name){
   };
   nb.appendChild(ta); body.appendChild(nb);
 
+  /* 客人預設抽成率：只決定下一筆自動帶入多少；已結帳收入保留自己的 commissionRate 快照 */
+  const cb=document.createElement('div'); cb.className='blk';
+  cb.innerHTML='<div class="blk-t">預設抽成比例</div>'+ 
+    '<div class="note-mini" style="margin:0 0 8px">留空＝沿用工作室預設。這裡改動不會重算已結帳的舊收入；結帳時仍可單筆修改。</div>';
+  const cf=document.createElement('div'); cf.className='field'; cf.innerHTML='<label>這位客人的預設抽成（%）</label>';
+  const ci=document.createElement('input'); ci.type='number'; ci.min='0'; ci.max='100'; ci.step='0.1'; ci.className='inline-input wide'; ci.placeholder='留空＝工作室預設 '+(Math.round(commissionCfg().rate*1000)/10)+'%';
+  if(opts.custCommission&&Object.prototype.hasOwnProperty.call(opts.custCommission,name))ci.value=String(Math.round(Number(opts.custCommission[name])*1000)/10);
+  ci.onchange=()=>{
+    if(!opts.custCommission)opts.custCommission={};
+    const raw=ci.value.trim();
+    if(raw==='')delete opts.custCommission[name];
+    else{
+      let p=Number(raw); if(!isFinite(p))p=0; p=Math.max(0,Math.min(100,p));
+      ci.value=String(Math.round(p*10)/10); opts.custCommission[name]=p/100;
+    }
+    saveOpts(); scheduleSync(); toast(raw===''?'已改為沿用工作室預設抽成':'已更新客人預設抽成');
+  };
+  cf.appendChild(ci); cb.appendChild(cf); body.appendChild(cb);
+
   /* 款式歷史（收入＋未結帳預約） */
   const hb=document.createElement('div'); hb.className='blk';
   hb.innerHTML='<div class="blk-t">款式歷史</div>';
@@ -1775,7 +1823,7 @@ $('#custMask').onclick=()=>{$('#custMask').classList.remove('show');$('#custShee
 
 /* ========= 記帳 Bottom Sheet ========= */
 let entryMode='income';
-let inSel={base:null,addons:[],extra:'',extraName:'',removal:null,freeRemoval:false,pct:null,fixed:null,custom:'',note:'',customer:'',monthly:'',monthlyName:''};
+let inSel={base:null,addons:[],extra:'',extraName:'',removal:null,freeRemoval:false,pct:null,fixed:null,custom:'',note:'',customer:'',monthly:'',monthlyName:'',commissionRate:''};
 let exSel={cat:Object.keys(opts.expCats)[0],items:[],other:'',note:''};
 let calcExpr='';
 let editingId=null;   /* 正在編輯的紀錄 id；null 表示新增 */
@@ -1819,7 +1867,7 @@ function effSlots(ds){
 }
 
 function resetForms(){
-  inSel={base:null,addons:[],extra:'',extraName:'',removal:null,freeRemoval:false,pct:null,fixed:null,custom:'',note:'',customer:'',monthly:'',monthlyName:''};
+  inSel={base:null,addons:[],extra:'',extraName:'',removal:null,freeRemoval:false,pct:null,fixed:null,custom:'',note:'',customer:'',monthly:'',monthlyName:'',commissionRate:''};
   exSel={cat:Object.keys(opts.expCats)[0],items:[],other:'',note:''};
   bkSel={name:'',time:'',channel:'',channelOther:'',plans:[],planNote:'',deposit:''};
   calcExpr='';
@@ -1840,6 +1888,7 @@ function openEntry(rec){
   }else{
     entryMode='income';
     resetForms();
+    inSel.commissionRate=String(Math.round(newIncomeCommissionRate('')*1000)/10);
   }
   const d=new Date(editDate+'T00:00:00');
   $('#entryDate').textContent=(editingId?'✏️ 編輯紀錄：':'記帳日期：')+d.getFullYear()+'/'+(d.getMonth()+1)+'/'+d.getDate()+'（'+WD[d.getDay()]+'）';
@@ -1868,6 +1917,7 @@ function openCheckout(bk){
     inSel.addons.push({id:'x_'+uid(),name:p.name,price:p.price});
   });
   inSel.customer=bk.name;
+  inSel.commissionRate=String(Math.round(newIncomeCommissionRate(bk.name)*1000)/10);
   /* [NEW] 訂金帳務閉環：記住已收訂金，底部即時顯示「現場應收」 */
   inSel.depositPaid=(bk.deposit>0)?bk.deposit:0;
   const parts=['客人：'+bk.name];
@@ -1905,7 +1955,7 @@ function prefillIncome(r){
   const bd=r.breakdown||{};
   const findBy=(arr,it)=>arr.find(o=>o.name===it.name&&o.price===it.price)||arr.find(o=>o.name===it.name);
   /* [FIX] 補上 extraName、monthlyName，避免編輯後按 OK 時 undefined.trim() 閃退 */
-  inSel={base:null,addons:[],extra:'',extraName:'',removal:null,freeRemoval:false,pct:null,fixed:null,custom:'',note:r.note||'',customer:r.customer||'',monthly:'',monthlyName:''};
+  inSel={base:null,addons:[],extra:'',extraName:'',removal:null,freeRemoval:false,pct:null,fixed:null,custom:'',note:r.note||'',customer:r.customer||'',monthly:'',monthlyName:'',commissionRate:String(Math.round(recordCommissionRate(r)*1000)/10)};
   exSel={cat:Object.keys(opts.expCats)[0],items:[],other:'',note:''};
   calcExpr='';
   if(bd.base){
@@ -1941,7 +1991,7 @@ function prefillExpense(r){
   const known=opts.expCats[cat]||[];
   const items=[],others=[];
   (r.items||[]).forEach(n=>known.includes(n)?items.push(n):others.push(n));
-  inSel={base:null,addons:[],extra:'',extraName:'',removal:null,freeRemoval:false,pct:null,fixed:null,custom:'',note:'',customer:'',monthly:'',monthlyName:''};
+  inSel={base:null,addons:[],extra:'',extraName:'',removal:null,freeRemoval:false,pct:null,fixed:null,custom:'',note:'',customer:'',monthly:'',monthlyName:'',commissionRate:''};
   exSel={cat:cat,items:items,other:others.join('、'),note:r.note||''};
   calcExpr=String(r.amount);
 }
@@ -2220,6 +2270,20 @@ function renderIncome(body){
   bn.chips.appendChild(ni);
   body.appendChild(bn.wrap);
 
+  /* 本次抽成快照：新收入自動帶工作室／客人預設，但本筆可覆寫；存檔後不再跟預設值連動 */
+  if(commissionCfg().enabled||editingId!==null){
+    const bc=blk('本次抽成比例');
+    const cri=document.createElement('input');
+    cri.type='number'; cri.min='0'; cri.max='100'; cri.step='0.1'; cri.className='inline-input'; cri.style.width='180px';
+    cri.placeholder='0～100'; cri.value=inSel.commissionRate;
+    cri.oninput=()=>{inSel.commissionRate=cri.value;};
+    const hint=document.createElement('span'); hint.className='note-mini';
+    hint.textContent=inSel.customer
+      ?('這筆會永久記住此比例；客人「'+inSel.customer+'」之後改預設也不影響本筆。')
+      :'這筆會永久記住此比例，不會因之後修改工作室預設而重算。';
+    bc.chips.appendChild(cri); bc.chips.appendChild(hint); body.appendChild(bc.wrap);
+  }
+
   /* 後台設定區 */
   body.appendChild(buildOptAdmin());
 }
@@ -2461,6 +2525,7 @@ $('#okBtn').onclick=()=>{
       discount:dParts.length?{label:dParts.join('・'),pct:inSel.pct,fixed:inSel.fixed||0,custom:isNaN(c)?0:c}:null,
       note:inSel.note.trim(),
       customer:inSel.customer||'',
+      commissionRate:(()=>{let p=Number(inSel.commissionRate);if(!isFinite(p))p=0;return Math.max(0,Math.min(1,p/100));})(),
       bkTime:(checkoutBkInfo&&checkoutBkInfo.bkTime)||'',
       bkChannel:(checkoutBkInfo&&checkoutBkInfo.bkChannel)||'',
       fromBooking:!!checkoutBkInfo
@@ -3125,11 +3190,11 @@ function buildStoreTab(body){
   lf.appendChild(lRow); card.appendChild(lf);
   body.appendChild(card);
 
-  /* 工作室抽成：每個品牌獨立；只影響報表計算，不改寫 income.amount */
+  /* 工作室抽成：每個品牌獨立；rate 是新收入預設值，每筆收入另存 commissionRate 快照，不改寫 income.amount */
   const ccfg=commissionCfg();
   const cb=document.createElement('div'); cb.className='blk';
   cb.innerHTML='<div class="blk-t">工作室抽成</div>'+ 
-    '<div class="note-mini" style="margin:0 0 10px">適合借用其他工作室、需按營收抽成的品牌。原始收入不會被改寫；報表會另外顯示工作室抽成、抽成後收入與最終淨額。</div>';
+    '<div class="note-mini" style="margin:0 0 10px">原始收入不會被改寫。這裡設定新收入的預設抽成；每位客人可有自己的預設比例，每次結帳也能單筆修改並永久保存。</div>';
 
   const swRow=document.createElement('label');
   swRow.style.cssText='display:flex;align-items:center;gap:10px;padding:8px 0;font-size:14px;font-weight:700;cursor:pointer';
@@ -3138,7 +3203,7 @@ function buildStoreTab(body){
   swRow.appendChild(sw); swRow.appendChild(swTxt); cb.appendChild(swRow);
 
   const cFields=document.createElement('div');
-  const rateF=document.createElement('div'); rateF.className='field'; rateF.innerHTML='<label>抽成比例（%）</label>';
+  const rateF=document.createElement('div'); rateF.className='field'; rateF.innerHTML='<label>工作室預設抽成比例（%）</label>';
   const rateI=document.createElement('input'); rateI.type='number'; rateI.min='0'; rateI.max='100'; rateI.step='0.1'; rateI.className='inline-input wide';
   rateI.value=String(Math.round(ccfg.rate*1000)/10);
   rateF.appendChild(rateI); cFields.appendChild(rateF);
@@ -3148,14 +3213,14 @@ function buildStoreTab(body){
   capI.value=ccfg.monthlyCap==null?'':String(ccfg.monthlyCap);
   capF.appendChild(capI); cFields.appendChild(capF);
   const cNote=document.createElement('div'); cNote.className='note-mini';
-  cNote.textContent='計算方式：每月實際抽成＝min（月收入 × 抽成比例, 每月上限）。上限留空時只按比例計算。修改設定會依目前設定重新計算舊報表。';
+  cNote.textContent='計算方式：每筆收入 × 該筆抽成率 → 當月加總 → 再套每月上限。客人可設 10%、20% 等不同預設；每筆結帳後會保存當時比例，之後改預設不會重算舊收入。';
   cFields.appendChild(cNote);
   cb.appendChild(cFields);
   const refreshCommissionFields=()=>{cFields.style.display=sw.checked?'':'none';};
   refreshCommissionFields();
 
   sw.onchange=()=>{
-    if(!opts.commission)opts.commission={enabled:false,rate:0,monthlyCap:null};
+    if(!opts.commission)opts.commission={enabled:false,rate:0,legacyRate:0,monthlyCap:null};
     opts.commission.enabled=sw.checked;
     saveOpts(); scheduleSync(); refreshCommissionFields(); renderRep();
     toast(sw.checked?'已啟用工作室抽成':'已關閉工作室抽成');
@@ -3165,12 +3230,12 @@ function buildStoreTab(body){
     if(!isFinite(p))p=0;
     p=Math.max(0,Math.min(100,p));
     rateI.value=String(Math.round(p*10)/10);
-    if(!opts.commission)opts.commission={enabled:false,rate:0,monthlyCap:null};
+    if(!opts.commission)opts.commission={enabled:false,rate:0,legacyRate:0,monthlyCap:null};
     opts.commission.rate=p/100;
-    saveOpts(); scheduleSync(); renderRep(); toast('抽成比例已更新');
+    saveOpts(); scheduleSync(); renderRep(); toast('工作室預設抽成比例已更新');
   };
   capI.onchange=()=>{
-    if(!opts.commission)opts.commission={enabled:false,rate:0,monthlyCap:null};
+    if(!opts.commission)opts.commission={enabled:false,rate:0,legacyRate:0,monthlyCap:null};
     const raw=capI.value.trim();
     if(raw==='')opts.commission.monthlyCap=null;
     else{
