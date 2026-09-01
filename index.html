@@ -75,8 +75,10 @@ header.app{
   padding:calc(10px + env(safe-area-inset-top)) 16px 8px;
 }
 .brand-row{display:flex;align-items:center;justify-content:space-between}
-.brand{display:flex;align-items:center;gap:10px}
+.brand{display:flex;align-items:center;gap:10px;cursor:pointer;border-radius:14px;padding:2px 6px 2px 2px;margin-left:-2px}
+.brand:active{background:rgba(255,255,255,.12)}
 .brand .brand-text{display:flex;align-items:baseline;gap:8px;min-width:0;flex-wrap:wrap}
+.brand-caret{font-size:12px;color:var(--on-bg-soft,var(--brown-soft));flex:none}
 #brandLogo{
   width:44px;height:44px;border-radius:50%;flex:none;
   background:var(--btn) center/contain no-repeat;color:var(--btn-text);
@@ -277,6 +279,20 @@ main{padding:14px 16px 120px;max-width:560px;margin:0 auto}
 }
 .inline-input.wide{width:100%}
 
+/* 品牌切換 */
+.brand-li{display:flex;align-items:center;gap:10px;padding:10px 2px;border-bottom:1px dashed var(--line);cursor:pointer}
+.brand-li:last-child{border-bottom:none}
+.brand-li .av{
+  width:38px;height:38px;border-radius:50%;flex:none;
+  display:flex;align-items:center;justify-content:center;
+  font-weight:800;font-size:16px;color:var(--btn-text);
+  background:var(--btn) center/contain no-repeat;border:1px solid var(--line);
+}
+.brand-li .nm{flex:1;font-weight:700;font-size:14.5px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.brand-li .tag{font-size:11.5px;color:var(--brown-soft);white-space:nowrap}
+.check-row{display:flex;align-items:flex-start;gap:9px;margin-top:10px;font-size:13px;line-height:1.5;cursor:pointer}
+.check-row input{width:18px;height:18px;flex:none;margin-top:1px}
+
 /* 計算機 */
 .calc{margin-top:10px}
 .calc-disp{
@@ -356,7 +372,7 @@ main{padding:14px 16px 120px;max-width:560px;margin:0 auto}
 
 <header class="app">
   <div class="brand-row">
-    <div class="brand"><span id="brandLogo"></span><span class="brand-text"><h1 id="brandName">PuliPuli.Studio</h1><span class="sub">美甲記帳</span></span></div>
+    <div class="brand" id="brandBtn" role="button" tabindex="0" aria-label="切換品牌"><span id="brandLogo"></span><span class="brand-text"><h1 id="brandName">PuliPuli.Studio</h1><span class="sub" id="brandSub">美甲記帳</span></span><span class="brand-caret">▾</span></div>
     <div class="head-actions">
       <span class="sync-dot" id="syncDot" title="同步狀態"></span>
       <button class="gear-btn" id="gearBtn" aria-label="設定">⚙︎</button>
@@ -497,6 +513,14 @@ main{padding:14px 16px 120px;max-width:560px;margin:0 auto}
   <div class="sheet-body" id="setBody"></div>
 </div>
 
+<!-- 品牌切換 Bottom Sheet -->
+<div class="sheet-mask" id="brandMask"></div>
+<div class="sheet" id="brandSheet" role="dialog" aria-label="切換品牌">
+  <div class="sheet-grip"></div>
+  <div class="sheet-head"><h3 style="text-align:center;font-size:15px;font-weight:800">品牌</h3></div>
+  <div class="sheet-body" id="brandBody"></div>
+</div>
+
 <div class="sheet-mask" id="colorEditorMask"></div>
 <div class="sheet" id="colorEditor" role="dialog" aria-label="配色編輯器" style="z-index:60">
   <div class="sheet-grip"></div>
@@ -555,7 +579,15 @@ function toast(msg){
 }
 
 /* ========= 資料 ========= */
+/* 一個使用者可以有多個品牌，每個品牌各有一份紀錄與設定；
+   儲存 key 一律是「基底名__品牌id」，權杖與雲端備份則共用一份。 */
 const LS_REC='pp_records', LS_OPT='pp_options', LS_SYNC='pp_sync';
+const LS_BRANDS='pp_brands', LS_CURB='pp_curBrand';
+const K_REC=id=>LS_REC+'__'+(id||curBrand);
+const K_OPT=id=>LS_OPT+'__'+(id||curBrand);
+const K_THEME=id=>'pp_theme__'+(id||curBrand);
+const K_SCHEDBG=id=>'pp_schedbg__'+(id||curBrand);
+let brands=[], curBrand='';
 const DEFAULT_OPTS={
   updatedAt:0,
   base:[
@@ -583,6 +615,19 @@ const DEFAULT_OPTS={
     footer:'簡易款式$599，卸甲$100，手繪來圖報價。\n*暫不接延甲\n*不接病甲/傷甲\n*不開放攜伴\n*內有狗狗&倉鼠，害怕動物者請斟酌'
   }
 };
+/* 新品牌若不複製設定，就用這份空白版本：分類保留、項目全空 */
+function blankOpts(name){
+  return {
+    updatedAt:Date.now(),
+    base:[],addon:[],removal:[],bookSvc:[],
+    expCats:{'進貨':[],'設備':[],'工作室營運':[],'行銷與雜支':[]},
+    sched:{slots:['11:00','15:00','19:00'],days:{},footer:''},
+    look:{set:'dark',customSets:[],cardAlpha:1},
+    store:{name:name,logo:''},
+    custNotes:{},
+    mig_xiejia:true,mig3:true
+  };
+}
 function ensureSched(){
   let dirty=false;
   if(!opts.sched){opts.sched=JSON.parse(JSON.stringify(DEFAULT_OPTS.sched));dirty=true;}
@@ -610,7 +655,7 @@ function ensureSched(){
   }
   /* 外觀設定（雲端同步）：從舊版本機設定遷移 */
   if(!opts.look){
-    const old=loadJSON(LS_THEME,null);
+    const old=loadJSON(K_THEME(),null);
     opts.look={
       color:(old&&old.color&&old.color.toUpperCase()!=='#FAF5EE')?old.color:'',
       btn:(old&&old.btn)||'',
@@ -627,8 +672,8 @@ function ensureSched(){
   /* v6：App 字體改為只存本機，從同步資料移除 */
   if(opts.look&&opts.look.font){
     try{
-      const lt=JSON.parse(localStorage.getItem(LS_THEME)||'{}');
-      if(!lt.font){lt.font=opts.look.font;localStorage.setItem(LS_THEME,JSON.stringify(lt));}
+      const lt=JSON.parse(localStorage.getItem(K_THEME())||'{}');
+      if(!lt.font){lt.font=opts.look.font;localStorage.setItem(K_THEME(),JSON.stringify(lt));}
     }catch(e){}
     delete opts.look.font; dirty=true;
   }
@@ -676,7 +721,7 @@ function ensureSched(){
     opts.mig3=true; dirty=true;
   }
   /* 遷移只寫入本機，不推進 updatedAt——否則新裝置會誤以為自己的設定比雲端新 */
-  if(dirty)localStorage.setItem(LS_OPT,JSON.stringify(opts));
+  if(dirty)localStorage.setItem(K_OPT(),JSON.stringify(opts));
 }
 const EXP_CATS={
   '進貨':['色膠','飾品','甲片','耗材'],
@@ -684,21 +729,215 @@ const EXP_CATS={
   '工作室營運':['租金','水電費','網路'],
   '行銷與雜支':['官方帳號月費','小點心','茶水','進修課程費用']
 };
-let records=loadJSON(LS_REC,[]);
-let opts=loadJSON(LS_OPT,null)||JSON.parse(JSON.stringify(DEFAULT_OPTS));
+
+/* ========= 品牌 ========= */
+function saveBrandsLocal(){
+  try{localStorage.setItem(LS_BRANDS,JSON.stringify(brands));}catch(e){}
+}
+function saveBrands(){saveBrandsLocal();scheduleSync();}
+function aliveBrands(){return brands.filter(b=>!b.deleted);}
+function brandName(id){
+  const o=(id===curBrand)?opts:loadJSON(K_OPT(id),null);
+  if(o&&o.store&&o.store.name)return o.store.name;
+  const b=brands.find(x=>x.id===id);
+  return (b&&b.name)||'未命名品牌';
+}
+function brandLogo(id){
+  const o=(id===curBrand)?opts:loadJSON(K_OPT(id),null);
+  return (o&&o.store&&o.store.logo)||'';
+}
+/* 首次啟動：把舊的單一品牌資料搬到固定 id b_main。
+   用固定 id 是關鍵——每台裝置遷移後都會對到同一筆，同步時才不會變成兩個重複品牌。 */
+function initBrands(){
+  brands=loadJSON(LS_BRANDS,null);
+  if(!Array.isArray(brands)||!brands.length){
+    let nm='PuliPuli.Studio';
+    try{
+      const o=JSON.parse(localStorage.getItem(LS_OPT)||'null');
+      if(o&&o.store&&o.store.name)nm=o.store.name;
+    }catch(e){}
+    brands=[{id:'b_main',name:nm,updatedAt:Date.now()}];
+    [[LS_REC,'pp_records__b_main'],[LS_OPT,'pp_options__b_main'],
+     ['pp_theme','pp_theme__b_main'],['pp_schedbg','pp_schedbg__b_main']].forEach(([from,to])=>{
+      const v=localStorage.getItem(from);
+      if(v!=null&&localStorage.getItem(to)==null){try{localStorage.setItem(to,v);}catch(e){}}
+    });
+    saveBrandsLocal();
+  }
+  curBrand=localStorage.getItem(LS_CURB)||'';
+  if(!brands.some(b=>b.id===curBrand&&!b.deleted)){
+    const a=aliveBrands();
+    curBrand=a.length?a[0].id:brands[0].id;
+  }
+  localStorage.setItem(LS_CURB,curBrand);
+}
+function loadBrandData(){
+  records=loadJSON(K_REC(),[]);
+  opts=loadJSON(K_OPT(),null)||JSON.parse(JSON.stringify(DEFAULT_OPTS));
+  ensureSched();
+  loadThemeObj();
+  schedBg=localStorage.getItem(K_SCHEDBG())||'';
+  applyTheme();
+}
+function switchBrand(id){
+  if(id===curBrand){closeBrandSheet();return;}
+  curBrand=id; localStorage.setItem(LS_CURB,id);
+  loadBrandData();
+  /* 換品牌＝換一本帳，畫面全部回到今天 */
+  selDate=fmtD(today); calY=today.getFullYear(); calM=today.getMonth();
+  schedY=today.getFullYear(); schedM=today.getMonth();
+  selWeek=weekStart(today).getTime(); repDate=new Date();
+  closeBrandSheet(); go('cal');
+  toast('已切換：'+brandName(id));
+}
+function addBrand(name,copy){
+  const id='b_'+uid();
+  let o;
+  if(copy){
+    o=JSON.parse(JSON.stringify(opts));
+    o.custNotes={};
+    if(o.sched)o.sched.days={};   /* 公休與單日時段屬於原品牌，不複製 */
+  }else{
+    o=blankOpts(name);
+  }
+  o.store={name:name,logo:''};
+  o.updatedAt=Date.now();
+  try{
+    localStorage.setItem(K_OPT(id),JSON.stringify(o));
+    localStorage.setItem(K_REC(id),'[]');
+  }catch(e){toast('儲存空間不足，無法新增品牌');return;}
+  brands.push({id:id,name:name,updatedAt:Date.now()});
+  saveBrands();
+  switchBrand(id);
+  toast('已建立品牌：'+name);
+}
+function deleteBrand(id){
+  if(aliveBrands().length<=1){toast('至少要保留一個品牌');return;}
+  const b=brands.find(x=>x.id===id); if(!b)return;
+  const nm=brandName(id);
+  if(!confirm('刪除品牌「'+nm+'」？\n這個品牌的所有紀錄與設定都會刪除，其他裝置同步後也會一起刪除。'))return;
+  if(!confirm('再確認一次：「'+nm+'」的資料無法復原。'))return;
+  b.deleted=true; b.updatedAt=Date.now();
+  [K_REC(id),K_OPT(id),K_THEME(id),K_SCHEDBG(id)].forEach(k=>localStorage.removeItem(k));
+  saveBrands();
+  openBrandSheet();
+  toast('已刪除品牌');
+}
+function mergeBrands(a,b){
+  const map={};
+  a.concat(b).forEach(x=>{
+    if(!x||!x.id)return;
+    const old=map[x.id];
+    if(!old||(x.updatedAt||0)>(old.updatedAt||0))map[x.id]=Object.assign({},x);
+  });
+  const arr=Object.values(map);
+  /* 在別台裝置被刪掉的品牌，本機資料一併清掉 */
+  arr.forEach(x=>{
+    if(x.deleted)[K_REC(x.id),K_OPT(x.id),K_THEME(x.id),K_SCHEDBG(x.id)].forEach(k=>localStorage.removeItem(k));
+  });
+  return arr;
+}
+/* 品牌墓碑保留 90 天，讓其他裝置有時間同步到「已刪除」 */
+function purgeBrands(arr){
+  const cutoff=Date.now()-90*864e5;
+  return arr.filter(b=>!(b&&b.deleted&&(b.updatedAt||0)<cutoff));
+}
+function ensureCurBrand(){
+  let a=aliveBrands();
+  if(!a.length){
+    const id='b_'+uid();
+    brands.push({id:id,name:'我的品牌',updatedAt:Date.now()});
+    saveBrandsLocal();
+    curBrand=id; localStorage.setItem(LS_CURB,id);
+    try{
+      localStorage.setItem(K_OPT(),JSON.stringify(blankOpts('我的品牌')));
+      localStorage.setItem(K_REC(),'[]');
+    }catch(e){}
+    loadBrandData(); go('cal');
+    return;
+  }
+  if(!a.some(b=>b.id===curBrand)){
+    curBrand=a[0].id; localStorage.setItem(LS_CURB,curBrand);
+    loadBrandData(); go(curPage);
+    toast('目前品牌已在其他裝置刪除，已切換到「'+brandName(curBrand)+'」');
+  }
+}
+function closeBrandSheet(){
+  $('#brandMask').classList.remove('show');
+  $('#brandSheet').classList.remove('show');
+}
+function openBrandSheet(){
+  const body=$('#brandBody'); body.innerHTML='';
+
+  const list=document.createElement('div'); list.className='blk';
+  list.innerHTML='<div class="blk-t">切換品牌</div>';
+  aliveBrands().forEach(b=>{
+    const nm=brandName(b.id), logo=brandLogo(b.id);
+    const row=document.createElement('div'); row.className='brand-li';
+    const av=document.createElement('span'); av.className='av';
+    if(logo){av.style.backgroundImage='url('+logo+')';av.style.backgroundColor='#FFFFFF';}
+    else av.textContent=((nm||'P').trim()[0]||'P').toUpperCase();
+    const t=document.createElement('span'); t.className='nm'; t.textContent=nm;
+    row.appendChild(av); row.appendChild(t);
+    if(b.id===curBrand){
+      const tag=document.createElement('span'); tag.className='tag'; tag.textContent='使用中 ✓';
+      row.appendChild(tag);
+    }else{
+      const cnt=loadJSON(K_REC(b.id),[]).filter(r=>r&&!r.deleted).length;
+      const tag=document.createElement('span'); tag.className='tag'; tag.textContent=cnt+' 筆';
+      row.appendChild(tag);
+      const rm=document.createElement('button'); rm.className='rm'; rm.textContent='刪除';
+      rm.onclick=e=>{e.stopPropagation();deleteBrand(b.id);};
+      row.appendChild(rm);
+    }
+    row.onclick=()=>switchBrand(b.id);
+    list.appendChild(row);
+  });
+  body.appendChild(list);
+
+  const add=document.createElement('div'); add.className='blk';
+  add.innerHTML='<div class="blk-t">新增品牌</div>';
+  const ni=document.createElement('input');
+  ni.type='text'; ni.className='inline-input wide'; ni.placeholder='品牌／店名';
+  add.appendChild(ni);
+  const cpRow=document.createElement('label'); cpRow.className='check-row';
+  const cb=document.createElement('input'); cb.type='checkbox';
+  cpRow.appendChild(cb);
+  cpRow.appendChild(document.createTextNode('複製目前品牌的設定（服務項目、支出分類、預約時段、配色）'));
+  add.appendChild(cpRow);
+  const btn=document.createElement('button'); btn.className='mini-btn solid'; btn.style.marginTop='12px';
+  btn.textContent='建立品牌';
+  btn.onclick=()=>{
+    const n=ni.value.trim();
+    if(!n){toast('請輸入品牌名稱');return;}
+    addBrand(n,cb.checked);
+  };
+  add.appendChild(btn);
+  const note=document.createElement('div'); note.className='note-mini';
+  note.textContent='每個品牌有各自的紀錄、服務項目、預約表、配色與 LOGO；GitHub 權杖與雲端備份共用一份。不勾選複製時，服務項目會是空的，可在記帳表單的後台設定新增。';
+  add.appendChild(note);
+  body.appendChild(add);
+
+  $('#brandMask').classList.add('show');
+  $('#brandSheet').classList.add('show');
+}
+
+initBrands();
+let records=loadJSON(K_REC(),[]);
+let opts=loadJSON(K_OPT(),null)||JSON.parse(JSON.stringify(DEFAULT_OPTS));
 let syncCfg=loadJSON(LS_SYNC,{token:'',gistId:'',last:0});
 
 function loadJSON(k,fb){try{const v=localStorage.getItem(k);return v?JSON.parse(v):fb}catch(e){return fb}}
 /* [NEW] 儲存空間滿時（背景圖佔用過多）不再靜默失敗，明確警告使用者 */
 function saveRecords(){
-  try{localStorage.setItem(LS_REC,JSON.stringify(records))}
+  try{localStorage.setItem(K_REC(),JSON.stringify(records))}
   catch(e){toast('⚠️ 儲存空間已滿，紀錄可能沒存到！請到設定移除背景圖後重試')}
 }
-function saveOpts(){opts.updatedAt=Date.now();localStorage.setItem(LS_OPT,JSON.stringify(opts))}
+function saveOpts(){opts.updatedAt=Date.now();localStorage.setItem(K_OPT(),JSON.stringify(opts))}
 function saveSync(){localStorage.setItem(LS_SYNC,JSON.stringify(syncCfg))}
 const live=()=>records.filter(r=>!r.deleted);
 
-/* ========= 外觀主題（只存在這台裝置，不會雲端同步） ========= */
+/* ========= 外觀主題（配色雲端同步，字體與背景圖只存這台裝置） ========= */
 const LS_THEME='pp_theme';
 const THEME_DEFAULT_COLOR='#3A3E6C';
 /* 主題配色 SET：深夜藍（預設，American Blue／UBE／Chinese Black／Cool Grey／Cadet Grey 衍生）
@@ -791,7 +1030,7 @@ function resolvedBtn(){return curSet().btn;}
 let theme=null;
 function loadThemeObj(){
   const lk=(opts&&opts.look)||{};
-  const local=loadJSON(LS_THEME,{})||{};
+  const local=loadJSON(K_THEME(),{})||{};
   theme={
     set:lk.set||'dark',
     font:local.font||lk.font||'system',
@@ -830,10 +1069,10 @@ function btnTextColor(hex){
   return (r*0.299+g*0.587+b*0.114)>165?'#5C4633':'#FFF9F2';
 }
 function saveTheme(){
-  /* 配色 → 雲端同步；字體與背景圖只存本機 */
+  /* 配色 → 雲端同步；字體與背景圖只存本機（各品牌分開） */
   opts.look={set:theme.set,customSets:customSets(),cardAlpha:(opts.look&&opts.look.cardAlpha!=null)?opts.look.cardAlpha:1};
   saveOpts(); scheduleSync();
-  try{localStorage.setItem(LS_THEME,JSON.stringify({image:theme.image,font:theme.font}))}catch(e){toast('圖片太大，無法儲存，請換一張小一點的')}
+  try{localStorage.setItem(K_THEME(),JSON.stringify({image:theme.image,font:theme.font}))}catch(e){toast('圖片太大，無法儲存，請換一張小一點的')}
 }
 function hexToRgba(hex,a){
   const m=/^#?([0-9a-f]{6})$/i.exec(hex||'');
@@ -899,6 +1138,8 @@ function applyTheme(draft){
   /* 店名與 LOGO */
   const bn=document.getElementById('brandName');
   if(bn&&opts.store)bn.textContent=opts.store.name||'PuliPuli.Studio';
+  const bs=document.getElementById('brandSub');
+  if(bs)bs.textContent=(aliveBrands().length>1)?'點此切換品牌':'美甲記帳';
   const lg=document.getElementById('brandLogo');
   if(lg&&opts.store){
     if(opts.store.logo){
@@ -947,6 +1188,9 @@ navs.cal.onclick=()=>go('cal');
 navs.sched.onclick=()=>go('sched');
 navs.rec.onclick=()=>go('rec');
 navs.rep.onclick=()=>go('rep');
+$('#brandBtn').onclick=openBrandSheet;
+$('#brandBtn').onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();openBrandSheet();}};
+$('#brandMask').onclick=closeBrandSheet;
 
 /* ========= 月曆 ========= */
 const today=new Date(); today.setHours(0,0,0,0);
@@ -2022,7 +2266,7 @@ function renderExpense(body){
   body.appendChild(sc);
 
   /* 該分類項目 */
-  const b1=blk(exSel.cat+'・項目（可複選）');
+  const b1=blk((exSel.cat||'支出')+'・項目（可複選）');
   (opts.expCats[exSel.cat]||[]).forEach(name=>{
     const on=exSel.items.includes(name);
     b1.chips.appendChild(chipBtn(name,null,on,()=>{
@@ -2175,7 +2419,7 @@ $('#okBtn').onclick=()=>{
 
 /* ===== IG 預約表圖片產生器（1080×1920，9:16 直式） ===== */
 const LS_SCHEDBG='pp_schedbg';
-let schedBg=localStorage.getItem(LS_SCHEDBG)||'';
+let schedBg=localStorage.getItem(K_SCHEDBG())||'';
 
 function rr(ctx,x,y,w,h,r){
   ctx.beginPath();
@@ -2322,7 +2566,8 @@ function genSchedule(y,m){
       }
       /* 產生後彈出成品預覽，確認再下載 */
       const url=cv.toDataURL('image/png');
-      openSchedPreview(url,'pulipuli-'+y+'-'+pad(m+1)+'-預約表.png');
+      const slug=((opts.store&&opts.store.name)||'pulipuli').replace(/[\\/:*?"<>|\s]/g,'');
+      openSchedPreview(url,slug+'-'+y+'-'+pad(m+1)+'-預約表.png');
       done(true);
     }catch(e){done(false);toast('產生失敗，請再試一次');}
   };
@@ -2471,7 +2716,7 @@ $('#schedBgFile').onchange=e=>{
     try{data=cv.toDataURL('image/jpeg',0.82);}catch(err){toast('讀取圖片失敗');return;}
     if(data.length>4000000){toast('圖片太大，請換一張');return;}
     schedBg=data;
-    try{localStorage.setItem(LS_SCHEDBG,schedBg);}catch(err){toast('儲存空間不足');return;}
+    try{localStorage.setItem(K_SCHEDBG(),schedBg);}catch(err){toast('儲存空間不足');return;}
     renderSchedCfg();
     toast('已設定預約表背景 🖼️');
   };
@@ -2681,7 +2926,8 @@ async function exportReport(){
 
   const a=document.createElement('a');
   a.href=cv.toDataURL('image/png');
-  a.download='pulipuli-報表-'+fmtD(new Date())+'.png';
+  const slug=((opts.store&&opts.store.name)||'pulipuli').replace(/[\\/:*?"<>|\s]/g,'');
+  a.download=slug+'-報表-'+fmtD(new Date())+'.png';
   a.click();
 }
 
@@ -2717,11 +2963,11 @@ function openSettings(tab){
   $('#setMask').classList.add('show'); $('#setSheet').classList.add('show');
 }
 
-/* ===== 基本資料分頁 ===== */
+/* ===== 基本資料分頁（編輯的是「目前品牌」） ===== */
 function buildStoreTab(body){
   const card=document.createElement('div'); card.className='blk';
   card.innerHTML='<div class="blk-t">🏠 店家基本資料</div>'+
-    '<div class="note-mini" style="margin:0 0 8px">店名會顯示在頂部、IG 預約表標題與報表上，並跟著雲端同步。</div>';
+    '<div class="note-mini" style="margin:0 0 8px">這裡改的是目前品牌「'+esc(brandName(curBrand))+'」。店名會顯示在頂部、IG 預約表標題與報表上，並跟著雲端同步。</div>';
   const f=document.createElement('div'); f.className='field';
   f.innerHTML='<label>店名</label>';
   const ni=document.createElement('input');
@@ -2730,6 +2976,8 @@ function buildStoreTab(body){
   ni.onchange=()=>{
     const v=ni.value.trim()||'PuliPuli.Studio';
     opts.store.name=v;
+    const b=brands.find(x=>x.id===curBrand);
+    if(b){b.name=v;b.updatedAt=Date.now();saveBrandsLocal();}
     saveOpts(); scheduleSync(); applyTheme();
     toast('店名已更新：'+v);
   };
@@ -2753,9 +3001,19 @@ function buildStoreTab(body){
   }
   lf.appendChild(lRow); card.appendChild(lf);
   body.appendChild(card);
+
+  /* 品牌入口 */
+  const bp=document.createElement('div'); bp.className='blk';
+  bp.innerHTML='<div class="blk-t">品牌</div>'+
+    '<div class="note-mini" style="margin:0 0 8px">目前共 '+aliveBrands().length+' 個品牌，各自有獨立的紀錄與設定。</div>';
+  const bb=document.createElement('button'); bb.className='mini-btn solid';
+  bb.textContent='切換／新增品牌';
+  bb.onclick=()=>{closeSettings();openBrandSheet();};
+  bp.appendChild(bb);
+  body.appendChild(bp);
 }
 
-/* LOGO 上傳：裁切置中縮到 144px，存進同步資料 */
+/* LOGO 上傳：置中縮到 144px，存進同步資料 */
 $('#logoFile').onchange=e=>{
   const f=e.target.files[0]; e.target.value='';
   if(!f)return;
@@ -2795,7 +3053,7 @@ function buildLookTab(body){
   /* —— 主題配色 SET 選擇 —— */
   const tp=document.createElement('div'); tp.className='blk';
   tp.innerHTML='<div class="blk-t">主題配色</div>'+
-    '<div class="note-mini" style="margin:0 0 8px">點一下套用；自訂配色會跟著雲端同步。內建兩套唯讀，想改請用「複製成新配色」。</div>';
+    '<div class="note-mini" style="margin:0 0 8px">點一下套用；自訂配色會跟著雲端同步。內建兩套唯讀，想改請用「複製成新配色」。每個品牌的配色各自獨立。</div>';
   const setRow=document.createElement('div');
   setRow.style.cssText='display:flex;gap:10px;flex-wrap:wrap';
   const swatch=c=>'<span style="width:18px;height:18px;border-radius:50%;background:'+c+';border:1.5px solid rgba(255,255,255,.7)"></span>';
@@ -3132,7 +3390,7 @@ function renderSchedCfg(){
   sBgRow.appendChild(sUp);
   if(schedBg){
     const sRm=document.createElement('button'); sRm.className='mini-btn'; sRm.textContent='移除（用主題色版型）';
-    sRm.onclick=()=>{schedBg='';localStorage.removeItem(LS_SCHEDBG);renderSchedCfg();toast('已改回主題色版型');};
+    sRm.onclick=()=>{schedBg='';localStorage.removeItem(K_SCHEDBG());renderSchedCfg();toast('已改回主題色版型');};
     sBgRow.appendChild(sRm);
   }
   gb.appendChild(sBgRow);
@@ -3147,7 +3405,7 @@ function renderSchedCfg(){
 function buildSyncTab(body){
   const card=document.createElement('div'); card.className='blk';
   card.innerHTML='<div class="blk-t">☁️ 雲端同步（GitHub Gist）</div>'+
-    '<div class="note-mini" style="margin:0 0 6px">到 GitHub → Settings → Developer settings → Personal access tokens 建立 classic token，只勾選 <b>gist</b> 權限，貼到下方即可。權杖只儲存在這台裝置的瀏覽器。</div>';
+    '<div class="note-mini" style="margin:0 0 6px">到 GitHub → Settings → Developer settings → Personal access tokens 建立 classic token，只勾選 <b>gist</b> 權限，貼到下方即可。權杖只儲存在這台裝置的瀏覽器，所有品牌共用同一份雲端備份。</div>';
 
   const f1=document.createElement('div'); f1.className='field';
   f1.innerHTML='<label>GitHub 權杖（Personal Access Token）</label>';
@@ -3170,6 +3428,9 @@ function buildSyncTab(body){
   const bImp=document.createElement('button'); bImp.className='mini-btn'; bImp.textContent='匯入 JSON';
   btns.appendChild(bTest); btns.appendChild(bSync); btns.appendChild(bExp); btns.appendChild(bImp);
   card.appendChild(btns);
+  const eNote=document.createElement('div'); eNote.className='note-mini';
+  eNote.textContent='匯出的備份包含所有品牌；匯入時會依品牌合併，不會蓋掉其他品牌的資料。';
+  card.appendChild(eNote);
   body.appendChild(card);
 
   const saveToken=()=>{
@@ -3190,7 +3451,7 @@ function buildSyncTab(body){
   ti.onchange=saveToken;
 
   bExp.onclick=()=>{
-    const data=JSON.stringify({records:records,opts:opts,exportedAt:new Date().toISOString()},null,2);
+    const data=JSON.stringify({brands:brands,data:collectAll(),exportedAt:new Date().toISOString()},null,2);
     const blob=new Blob([data],{type:'application/json'});
     const a=document.createElement('a');
     a.href=URL.createObjectURL(blob);
@@ -3232,12 +3493,12 @@ $('#importFile').onchange=e=>{
   const rd=new FileReader();
   rd.onload=()=>{
     try{
-      const data=JSON.parse(rd.result);
-      if(!Array.isArray(data.records))throw 0;
-      records=mergeRecords(records,data.records);
-      if(data.opts&&(data.opts.updatedAt||0)>(opts.updatedAt||0))opts=data.opts;
-      saveRecords(); saveOpts(); scheduleSync();
-      renderCal(); toast('匯入完成，已合併 '+data.records.length+' 筆資料');
+      const p=normalizePayload(JSON.parse(rd.result));
+      if(!p)throw 0;
+      applyRemotePayload(p);
+      scheduleSync();
+      loadBrandData(); go(curPage);
+      toast('匯入完成，共 '+(p.brands||[]).filter(b=>!b.deleted).length+' 個品牌');
     }catch(err){toast('檔案格式不正確，匯入失敗');}
   };
   rd.readAsText(f);
@@ -3248,7 +3509,7 @@ $('#importFile').onchange=e=>{
 const GIST_FILE='pulipuli-data.json';
 let syncTimer=null, syncing=false;
 function scheduleSync(){
-  if(!syncCfg.token)return;
+  if(!syncCfg||!syncCfg.token)return;
   clearTimeout(syncTimer);
   syncTimer=setTimeout(()=>syncNow(false),2000);
 }
@@ -3277,6 +3538,50 @@ function mergeRecords(a,b){
 function purgeDeleted(arr){
   const cutoff=Date.now()-90*864e5;
   return arr.filter(r=>!(r&&r.deleted&&(r.updatedAt||0)<cutoff));
+}
+/* 舊格式（單一品牌 {records,opts}）自動包成 b_main，換裝置或舊備份都接得回來 */
+function normalizePayload(r){
+  if(!r||typeof r!=='object')return null;
+  if(Array.isArray(r.brands)&&r.data)return r;
+  if(Array.isArray(r.records)){
+    const nm=(r.opts&&r.opts.store&&r.opts.store.name)||'PuliPuli.Studio';
+    return {brands:[{id:'b_main',name:nm,updatedAt:0}],data:{b_main:{records:r.records,opts:r.opts||null}}};
+  }
+  return null;
+}
+function collectAll(){
+  const data={};
+  aliveBrands().forEach(b=>{
+    if(b.id===curBrand)data[b.id]={records:records,opts:opts};
+    else data[b.id]={records:loadJSON(K_REC(b.id),[]),opts:loadJSON(K_OPT(b.id),null)};
+  });
+  return data;
+}
+function applyRemotePayload(raw){
+  const r=normalizePayload(raw);
+  if(!r)return;
+  brands=purgeBrands(mergeBrands(brands,r.brands||[]));
+  const data=r.data||{};
+  Object.keys(data).forEach(id=>{
+    const b=brands.find(x=>x.id===id);
+    if(!b||b.deleted)return;
+    const d=data[id]||{};
+    if(id===curBrand){
+      records=purgeDeleted(mergeRecords(records,d.records||[]));
+      if(d.opts&&(d.opts.updatedAt||0)>(opts.updatedAt||0)){opts=d.opts;ensureSched();loadThemeObj();applyTheme();}
+      saveRecords();
+      try{localStorage.setItem(K_OPT(),JSON.stringify(opts));}catch(e){}
+    }else{
+      const merged=purgeDeleted(mergeRecords(loadJSON(K_REC(id),[]),d.records||[]));
+      try{localStorage.setItem(K_REC(id),JSON.stringify(merged));}catch(e){}
+      const lo=loadJSON(K_OPT(id),null);
+      if(d.opts&&(!lo||(d.opts.updatedAt||0)>(lo.updatedAt||0))){
+        try{localStorage.setItem(K_OPT(id),JSON.stringify(d.opts));}catch(e){}
+      }
+    }
+  });
+  saveBrandsLocal();
+  ensureCurBrand();
 }
 function setSyncUI(state,msg){
   const dot=$('#syncDot');
@@ -3336,13 +3641,8 @@ async function syncNow(manual){
       }else throw new Error('權杖無效（'+ls.status+'）');
     }
     /* 合併 */
-    const applyRemote=r2=>{
-      records=purgeDeleted(mergeRecords(records,r2.records||[]));
-      if(r2.opts&&(r2.opts.updatedAt||0)>(opts.updatedAt||0)){opts=r2.opts;ensureSched();loadThemeObj();applyTheme();}
-      saveRecords(); localStorage.setItem(LS_OPT,JSON.stringify(opts));
-    };
-    if(remote)applyRemote(remote);
-    else records=purgeDeleted(records);
+    if(remote)applyRemotePayload(remote);
+    else{records=purgeDeleted(records);saveRecords();}
     /* [NEW] 上傳前二次確認：若下載之後雲端又被別台裝置更新過，
        先把對方的資料拉下來合併，避免整包覆蓋掉對方剛記的紀錄 */
     if(syncCfg.gistId&&remoteStamp){
@@ -3354,13 +3654,13 @@ async function syncNow(manual){
           if(f3){
             let c3=f3.content;
             if(f3.truncated){const raw=await fetch(f3.raw_url);c3=await raw.text();}
-            try{const r3=JSON.parse(c3);applyRemote(r3);}catch(e){}
+            try{const r3=JSON.parse(c3);applyRemotePayload(r3);}catch(e){}
           }
         }
       }
     }
     /* 上傳 */
-    const payload=JSON.stringify({records:records,opts:opts,syncedAt:new Date().toISOString()},null,1);
+    const payload=JSON.stringify({brands:brands,data:collectAll(),syncedAt:new Date().toISOString()},null,1);
     if(!syncCfg.gistId){
       const res=await gh('POST','/gists',{
         description:'PuliPuli.Studio 記帳資料（自動同步，請勿手動修改）',
