@@ -613,7 +613,9 @@ const DEFAULT_OPTS={
     slots:['11:00','15:00','19:00'],
     days:{},
     footer:'簡易款式$599，卸甲$100，手繪來圖報價。\n*暫不接延甲\n*不接病甲/傷甲\n*不開放攜伴\n*內有狗狗&倉鼠，害怕動物者請斟酌'
-  }
+  },
+  /* 工作室抽成：每個品牌獨立設定；rate 以小數儲存（20% = 0.2），monthlyCap=null 表示無上限 */
+  commission:{enabled:false,rate:0,monthlyCap:null}
 };
 /* 新品牌若不複製設定，就用這份空白版本：分類保留、項目全空 */
 function blankOpts(name){
@@ -624,6 +626,7 @@ function blankOpts(name){
     sched:{slots:['11:00','15:00','19:00'],days:{},footer:''},
     look:{set:'dark',customSets:[],cardAlpha:1},
     store:{name:name,logo:''},
+    commission:{enabled:false,rate:0,monthlyCap:null},
     custNotes:{},
     mig_xiejia:true,mig3:true
   };
@@ -667,6 +670,15 @@ function ensureSched(){
   /* 店家基本資料 */
   if(!opts.store){opts.store={name:'PuliPuli.Studio',logo:''};dirty=true;}
   if(opts.store.logo==null)opts.store.logo='';
+  /* 工作室抽成設定：舊品牌沒有欄位時一律視為關閉，不需要搬動任何既有收入紀錄 */
+  if(!opts.commission){opts.commission={enabled:false,rate:0,monthlyCap:null};dirty=true;}
+  if(opts.commission.enabled==null)opts.commission.enabled=false;
+  if(typeof opts.commission.rate!=='number'||!isFinite(opts.commission.rate))opts.commission.rate=0;
+  opts.commission.rate=Math.max(0,Math.min(1,opts.commission.rate));
+  if(opts.commission.monthlyCap!==null){
+    const cc=Number(opts.commission.monthlyCap);
+    opts.commission.monthlyCap=(isFinite(cc)&&cc>=0)?Math.round(cc):null;
+  }
   /* [NEW] 客人備註（甲床狀況、喜好…），跟著雲端同步 */
   if(!opts.custNotes){opts.custNotes={};dirty=true;}
   /* v6：App 字體改為只存本機，從同步資料移除 */
@@ -903,7 +915,7 @@ function openBrandSheet(){
   const cpRow=document.createElement('label'); cpRow.className='check-row';
   const cb=document.createElement('input'); cb.type='checkbox';
   cpRow.appendChild(cb);
-  cpRow.appendChild(document.createTextNode('複製目前品牌的設定（服務項目、支出分類、預約時段、配色）'));
+  cpRow.appendChild(document.createTextNode('複製目前品牌的設定（服務項目、支出分類、預約時段、配色、抽成設定）'));
   add.appendChild(cpRow);
   const btn=document.createElement('button'); btn.className='mini-btn solid'; btn.style.marginTop='12px';
   btn.textContent='建立品牌';
@@ -1436,6 +1448,64 @@ function renderRec(){
   if(todayHdr)requestAnimationFrame(()=>todayHdr.scrollIntoView({block:'nearest'}));
 }
 
+/* ========= 工作室抽成 ========= */
+function commissionCfg(){
+  const c=opts.commission||{};
+  const rate=(typeof c.rate==='number'&&isFinite(c.rate))?Math.max(0,Math.min(1,c.rate)):0;
+  let cap=null;
+  if(c.monthlyCap!==null&&c.monthlyCap!==''&&c.monthlyCap!==undefined){
+    const n=Number(c.monthlyCap);
+    if(isFinite(n)&&n>=0)cap=Math.round(n);
+  }
+  return {enabled:!!c.enabled,rate:rate,monthlyCap:cap};
+}
+function incomeSumBetween(startDs,endDs){
+  return live().filter(r=>r.type==='income'&&r.date>=startDs&&r.date<=endDs).reduce((s,r)=>s+r.amount,0);
+}
+function monthCommission(y,m,endDay){
+  const c=commissionCfg();
+  const mm=pad(m+1);
+  const last=new Date(y,m+1,0).getDate();
+  const d=(endDay==null)?last:Math.max(0,Math.min(last,endDay));
+  if(d<=0)return {gross:0,raw:0,commission:0,net:0};
+  const start=y+'-'+mm+'-01', end=y+'-'+mm+'-'+pad(d);
+  const gross=incomeSumBetween(start,end);
+  if(!c.enabled||c.rate<=0)return {gross:gross,raw:0,commission:0,net:gross};
+  const raw=Math.round(gross*c.rate);
+  const commission=c.monthlyCap==null?raw:Math.min(raw,c.monthlyCap);
+  return {gross:gross,raw:raw,commission:commission,net:gross-commission};
+}
+/* 期間抽成：月＝該月；年＝逐月套上限再加總；日＝該日造成的「本月累積抽成增量」 */
+function commissionForReport(){
+  const c=commissionCfg();
+  if(!c.enabled)return {enabled:false,commission:0,monthToDate:0,cap:c.monthlyCap,rate:c.rate};
+  const y=repDate.getFullYear(),m=repDate.getMonth();
+  if(repPer==='year'){
+    let commission=0,gross=0;
+    for(let i=0;i<12;i++){
+      const x=monthCommission(y,i);
+      commission+=x.commission; gross+=x.gross;
+    }
+    return {enabled:true,commission:commission,gross:gross,net:gross-commission,monthToDate:null,cap:c.monthlyCap,rate:c.rate};
+  }
+  if(repPer==='month'){
+    const x=monthCommission(y,m);
+    return {enabled:true,commission:x.commission,gross:x.gross,net:x.net,monthToDate:x.commission,cap:c.monthlyCap,rate:c.rate};
+  }
+  const d=repDate.getDate();
+  const cur=monthCommission(y,m,d);
+  const prev=monthCommission(y,m,d-1);
+  return {
+    enabled:true,
+    commission:Math.max(0,cur.commission-prev.commission),
+    gross:null,
+    net:null,
+    monthToDate:cur.commission,
+    cap:c.monthlyCap,
+    rate:c.rate
+  };
+}
+
 /* ========= 報表 ========= */
 let repPer='month';
 let repDate=new Date();
@@ -1520,12 +1590,30 @@ function renderRep(){
   const rs=live().filter(per.test);
   const inSum=rs.filter(r=>r.type==='income').reduce((s,r)=>s+r.amount,0);
   const exSum=rs.filter(r=>r.type==='expense').reduce((s,r)=>s+r.amount,0);
+  const comm=commissionForReport();
+  const commission=comm.enabled?comm.commission:0;
+  const netRevenue=inSum-commission;
+  const finalNet=netRevenue-exSum;
 
   /* 收支圓餅 */
   $('#repPieTitle').textContent=per.label+'・收支圓餅圖';
-  const pieData=[{label:'收入',value:inSum,color:curSet().pieIn},{label:'支出',value:exSum,color:curSet().pieEx}];
-  $('#repPie').innerHTML=pieSVG(pieData)+( (inSum+exSum)>0 ? legendHTML(pieData,inSum+exSum)+
-    '<div style="width:100%;text-align:center;font-size:13px;color:var(--brown-soft)">淨額 <b style="color:'+(inSum-exSum<0?'var(--red)':'var(--brown)')+';font-size:16px">'+money(inSum-exSum)+'</b></div>' : '');
+  const pieData=comm.enabled
+    ?[{label:'總收入',value:inSum,color:curSet().pieIn},{label:'工作室抽成',value:commission,color:curSet().brownSoft},{label:'支出',value:exSum,color:curSet().pieEx}]
+    :[{label:'收入',value:inSum,color:curSet().pieIn},{label:'支出',value:exSum,color:curSet().pieEx}];
+  let financeHtml='';
+  if((inSum+commission+exSum)>0){
+    financeHtml=legendHTML(pieData,inSum+commission+exSum);
+    if(comm.enabled){
+      financeHtml+='<div style="width:100%;text-align:center;font-size:13px;line-height:1.9;color:var(--brown-soft)">'+
+        '抽成後收入 <b style="color:var(--brown);font-size:16px">'+money(netRevenue)+'</b>　'+
+        '最終淨額 <b style="color:'+(finalNet<0?'var(--red)':'var(--brown)')+';font-size:16px">'+money(finalNet)+'</b>'+
+        (repPer==='day'?'<br>本月截至此日累積抽成 <b>'+money(comm.monthToDate)+'</b>'+(comm.cap==null?'（無上限）':' / '+money(comm.cap)):'')+
+        '</div>';
+    }else{
+      financeHtml+='<div style="width:100%;text-align:center;font-size:13px;color:var(--brown-soft)">淨額 <b style="color:'+(finalNet<0?'var(--red)':'var(--brown)')+';font-size:16px">'+money(finalNet)+'</b></div>';
+    }
+  }
+  $('#repPie').innerHTML=pieSVG(pieData)+financeHtml;
 
   /* 客單價 */
   const visits=rs.filter(r=>r.type==='income').length;
@@ -1556,6 +1644,7 @@ function renderRep(){
   $('#repAvg').innerHTML=
     '<div class="kpi"><span class="big">'+money(avg)+'</span><span class="unit">/ 人（'+esc(per.label)+'）</span></div>'+
     '<div class="kpi-sub"><span>總收入 <b>'+money(inSum)+'</b></span><span>來客數 <b>'+visits+' 位</b></span></div>'+
+    (comm.enabled?'<div class="kpi-sub" style="margin-top:6px"><span>工作室抽成 <b>-'+money(commission).replace(/^-/,'')+'</b></span><span>抽成後收入 <b>'+money(netRevenue)+'</b></span></div>':'')+
     ((pIn>0||pV>0||inSum>0||visits>0)
       ?'<div class="kpi-sub" style="margin-top:6px"><span>vs '+esc(plabel)+'：收入 '+cmp(inSum,pIn,true)+'</span><span>來客 '+cmp(visits,pV,false)+'</span></div>'
       :'');
@@ -1859,13 +1948,16 @@ function prefillExpense(r){
 function closeEntry(){$('#entryMask').classList.remove('show');$('#entrySheet').classList.remove('show');editingId=null;}
 $('#fabBtn').onclick=()=>openEntry();
 $('#entryMask').onclick=closeEntry;
-$('#segIn').onclick=()=>{entryMode='income';renderSeg();renderEntryBody();};
-$('#segEx').onclick=()=>{entryMode='expense';renderSeg();renderEntryBody();};
-$('#segBk').onclick=()=>{entryMode='booking';renderSeg();renderEntryBody();};
+$('#segIn').onclick=()=>{if(editingId!==null)return;entryMode='income';renderSeg();renderEntryBody();};
+$('#segEx').onclick=()=>{if(editingId!==null)return;entryMode='expense';renderSeg();renderEntryBody();};
+$('#segBk').onclick=()=>{if(editingId!==null)return;entryMode='booking';renderSeg();renderEntryBody();};
 function renderSeg(){
-  $('#segIn').className=entryMode==='income'?'on in':'';
-  $('#segEx').className=entryMode==='expense'?'on ex':'';
-  $('#segBk').className=entryMode==='booking'?'on bk':'';
+  const bIn=$('#segIn'),bEx=$('#segEx'),bBk=$('#segBk');
+  bIn.className=entryMode==='income'?'on in':'';
+  bEx.className=entryMode==='expense'?'on ex':'';
+  bBk.className=entryMode==='booking'?'on bk':'';
+  /* 編輯既有紀錄時鎖住 type；booking → income 只能走既有結帳流程 */
+  [bIn,bEx,bBk].forEach(b=>{b.disabled=(editingId!==null&&!b.classList.contains('on'));});
 }
 
 function chipBtn(label,price,on,cb,exStyle){
@@ -2392,12 +2484,17 @@ $('#okBtn').onclick=()=>{
     if(bkSel.time){
       const toMin=t=>{const m=/^(\d{1,2}):(\d{2})$/.exec(t);return m?(+m[1])*60+(+m[2]):null;};
       const myMin=toMin(bkSel.time);
-      const near=live().filter(r=>
-        r.type==='booking'&&r.date===editDate&&r.id!==wasEditing&&r.time&&
-        myMin!=null&&toMin(r.time)!=null&&Math.abs(toMin(r.time)-myMin)<90
-      );
+      const near=live().filter(r=>{
+        if(r.date!==editDate||r.id===wasEditing)return false;
+        const occupied=(r.type==='booking')?r.time:((r.type==='income')?r.bkTime:'');
+        return !!occupied&&myMin!=null&&toMin(occupied)!=null&&Math.abs(toMin(occupied)-myMin)<90;
+      });
       if(near.length){
-        const who=near.map(r=>r.time+' '+r.name).join('、');
+        const who=near.map(r=>{
+          const t=r.type==='booking'?r.time:r.bkTime;
+          const n=r.type==='booking'?r.name:(r.customer||'已結帳客人');
+          return t+' '+n;
+        }).join('、');
         if(!confirm('⚠️ 注意撞單：當天已有「'+who+'」的預約，時間很接近，仍要儲存嗎？'))return;
       }
     }
@@ -2754,6 +2851,10 @@ async function exportReport(){
   const rs=live().filter(per.test);
   const inSum=rs.filter(r=>r.type==='income').reduce((s,r)=>s+r.amount,0);
   const exSum=rs.filter(r=>r.type==='expense').reduce((s,r)=>s+r.amount,0);
+  const comm=commissionForReport();
+  const commission=comm.enabled?comm.commission:0;
+  const netRevenue=inSum-commission;
+  const finalNet=netRevenue-exSum;
   const visits=rs.filter(r=>r.type==='income').length;
   const avg=visits?Math.round(inSum/visits):0;
   const svcMap={};
@@ -2789,8 +2890,8 @@ async function exportReport(){
   const W=1080,PAD=56,CW=W-PAD*2;
   const SET=curSet();
   const BROWN=SET.ink, BROWN2=SET.brown2, SOFT=SET.brownSoft;
-  const hCardA=(inSum+exSum)>0?400:200;
-  const hCardB=250;
+  const hCardA=(inSum+exSum+commission)>0?(comm.enabled?470:400):200;
+  const hCardB=comm.enabled?300:250;
   /* [FIX] 服務佔比卡片高度改依項目數計算，6 個項目時圖例才不會爆出卡片 */
   const hCardC=svcTotal>0?Math.max(370,140+svcData.length*46):200;
   const hCardD=330;
@@ -2850,15 +2951,33 @@ async function exportReport(){
 
   /* A. 收支圓餅 */
   let top=card(hCardA,per.label+'・收支圓餅圖');
-  if((inSum+exSum)>0){
-    const pieData=[{label:'收入',value:inSum,color:curSet().pieIn},{label:'支出',value:exSum,color:curSet().pieEx}];
-    donut(PAD+170,top+160,120,pieData,inSum+exSum);
-    let ly=legend(PAD+360,top+110,pieData.filter(d=>d.value>0),inSum+exSum);
+  if((inSum+exSum+commission)>0){
+    const pieData=comm.enabled
+      ?[{label:'總收入',value:inSum,color:curSet().pieIn},{label:'工作室抽成',value:commission,color:curSet().brownSoft},{label:'支出',value:exSum,color:curSet().pieEx}]
+      :[{label:'收入',value:inSum,color:curSet().pieIn},{label:'支出',value:exSum,color:curSet().pieEx}];
+    const pieTotal=inSum+commission+exSum;
+    donut(PAD+170,top+160,120,pieData,pieTotal);
+    let ly=legend(PAD+360,top+90,pieData.filter(d=>d.value>0),pieTotal);
     ctx.fillStyle=SOFT; ctx.font=F('400',26);
-    ctx.fillText('淨額',PAD+360,ly+26);
-    ctx.fillStyle=(inSum-exSum)<0?'#C46A5A':BROWN;
-    ctx.font=F('800',40);
-    ctx.fillText(money(inSum-exSum),PAD+430,ly+28);
+    if(comm.enabled){
+      ctx.fillText('抽成後收入',PAD+360,ly+20);
+      ctx.fillStyle=BROWN; ctx.font=F('800',36);
+      ctx.fillText(money(netRevenue),PAD+530,ly+22);
+      ly+=50;
+      ctx.fillStyle=SOFT; ctx.font=F('400',26);
+      ctx.fillText('最終淨額',PAD+360,ly+20);
+      ctx.fillStyle=finalNet<0?'#C46A5A':BROWN; ctx.font=F('800',36);
+      ctx.fillText(money(finalNet),PAD+500,ly+22);
+      if(repPer==='day'){
+        ly+=50; ctx.fillStyle=SOFT; ctx.font=F('400',24);
+        ctx.fillText('本月截至此日累積抽成 '+money(comm.monthToDate)+(comm.cap==null?'（無上限）':' / '+money(comm.cap)),PAD+360,ly+16);
+      }
+    }else{
+      ctx.fillText('淨額',PAD+360,ly+26);
+      ctx.fillStyle=finalNet<0?'#C46A5A':BROWN;
+      ctx.font=F('800',40);
+      ctx.fillText(money(finalNet),PAD+430,ly+28);
+    }
   }else{
     ctx.fillStyle=SOFT; ctx.font=F('400',28); ctx.textAlign='center';
     ctx.fillText('此期間尚無資料',W/2,top+90); ctx.textAlign='left';
@@ -2873,6 +2992,10 @@ async function exportReport(){
   ctx.fillText('/ 人（'+per.label+'）',PAD+36+avgW+16,top+94);
   ctx.fillStyle=BROWN2; ctx.font=F('400',28);
   ctx.fillText('總收入 '+money(inSum)+'　　來客數 '+visits+' 位',PAD+36,top+152);
+  if(comm.enabled){
+    ctx.fillStyle=SOFT; ctx.font=F('400',24);
+    ctx.fillText('工作室抽成 -'+money(commission).replace(/^-/,'')+'　　抽成後收入 '+money(netRevenue),PAD+36,top+198);
+  }
 
   /* C. 服務佔比 */
   top=card(hCardC,'服務佔比');
@@ -3001,6 +3124,63 @@ function buildStoreTab(body){
   }
   lf.appendChild(lRow); card.appendChild(lf);
   body.appendChild(card);
+
+  /* 工作室抽成：每個品牌獨立；只影響報表計算，不改寫 income.amount */
+  const ccfg=commissionCfg();
+  const cb=document.createElement('div'); cb.className='blk';
+  cb.innerHTML='<div class="blk-t">工作室抽成</div>'+ 
+    '<div class="note-mini" style="margin:0 0 10px">適合借用其他工作室、需按營收抽成的品牌。原始收入不會被改寫；報表會另外顯示工作室抽成、抽成後收入與最終淨額。</div>';
+
+  const swRow=document.createElement('label');
+  swRow.style.cssText='display:flex;align-items:center;gap:10px;padding:8px 0;font-size:14px;font-weight:700;cursor:pointer';
+  const sw=document.createElement('input'); sw.type='checkbox'; sw.checked=ccfg.enabled;
+  const swTxt=document.createElement('span'); swTxt.textContent='啟用工作室抽成';
+  swRow.appendChild(sw); swRow.appendChild(swTxt); cb.appendChild(swRow);
+
+  const cFields=document.createElement('div');
+  const rateF=document.createElement('div'); rateF.className='field'; rateF.innerHTML='<label>抽成比例（%）</label>';
+  const rateI=document.createElement('input'); rateI.type='number'; rateI.min='0'; rateI.max='100'; rateI.step='0.1'; rateI.className='inline-input wide';
+  rateI.value=String(Math.round(ccfg.rate*1000)/10);
+  rateF.appendChild(rateI); cFields.appendChild(rateF);
+
+  const capF=document.createElement('div'); capF.className='field'; capF.innerHTML='<label>每月抽成上限（元）</label>';
+  const capI=document.createElement('input'); capI.type='number'; capI.min='0'; capI.step='1'; capI.className='inline-input wide'; capI.placeholder='留空＝無上限';
+  capI.value=ccfg.monthlyCap==null?'':String(ccfg.monthlyCap);
+  capF.appendChild(capI); cFields.appendChild(capF);
+  const cNote=document.createElement('div'); cNote.className='note-mini';
+  cNote.textContent='計算方式：每月實際抽成＝min（月收入 × 抽成比例, 每月上限）。上限留空時只按比例計算。修改設定會依目前設定重新計算舊報表。';
+  cFields.appendChild(cNote);
+  cb.appendChild(cFields);
+  const refreshCommissionFields=()=>{cFields.style.display=sw.checked?'':'none';};
+  refreshCommissionFields();
+
+  sw.onchange=()=>{
+    if(!opts.commission)opts.commission={enabled:false,rate:0,monthlyCap:null};
+    opts.commission.enabled=sw.checked;
+    saveOpts(); scheduleSync(); refreshCommissionFields(); renderRep();
+    toast(sw.checked?'已啟用工作室抽成':'已關閉工作室抽成');
+  };
+  rateI.onchange=()=>{
+    let p=Number(rateI.value);
+    if(!isFinite(p))p=0;
+    p=Math.max(0,Math.min(100,p));
+    rateI.value=String(Math.round(p*10)/10);
+    if(!opts.commission)opts.commission={enabled:false,rate:0,monthlyCap:null};
+    opts.commission.rate=p/100;
+    saveOpts(); scheduleSync(); renderRep(); toast('抽成比例已更新');
+  };
+  capI.onchange=()=>{
+    if(!opts.commission)opts.commission={enabled:false,rate:0,monthlyCap:null};
+    const raw=capI.value.trim();
+    if(raw==='')opts.commission.monthlyCap=null;
+    else{
+      let n=Math.round(Number(raw));
+      if(!isFinite(n)||n<0)n=0;
+      opts.commission.monthlyCap=n; capI.value=String(n);
+    }
+    saveOpts(); scheduleSync(); renderRep(); toast('抽成上限已更新');
+  };
+  body.appendChild(cb);
 
   /* 品牌入口 */
   const bp=document.createElement('div'); bp.className='blk';
