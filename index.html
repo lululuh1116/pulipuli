@@ -1073,7 +1073,8 @@ function markSave(kind,ok){
 function saveRecords(){
   try{
     const stored=loadJSON(K_REC(),[]);
-    if(Array.isArray(stored)&&stored.length)records=purgeDeleted(mergeRecords(stored,records));
+    /* 記憶體版本放前面：時間相同時以這個分頁為準，另一個分頁較新的才會蓋過來 */
+    if(Array.isArray(stored)&&stored.length)records=purgeDeleted(mergeRecords(records,stored));
     localStorage.setItem(K_REC(),JSON.stringify(records));markSave('rec',true);return true;
   }
   catch(e){markSave('rec',false);return false;}
