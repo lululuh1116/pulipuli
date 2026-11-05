@@ -4232,10 +4232,19 @@ function collectAll(){
   });
   return data;
 }
+/* 比較兩份設定內容是否相同（忽略 updatedAt 與欄位順序） */
+function stableStr(v){
+  if(Array.isArray(v))return '['+v.map(stableStr).join(',')+']';
+  if(isObj(v))return '{'+Object.keys(v).filter(k=>k!=='updatedAt').sort().map(k=>JSON.stringify(k)+':'+stableStr(v[k])).join(',')+'}';
+  return JSON.stringify(v===undefined?null:v);
+}
 function applyRemotePayload(raw,opt){
   const r=sanitizePayload(normalizePayload(raw));
   if(!r)return;
   let restored=0;
+  /* 方案甲：這台裝置第一次對到這個雲端備份時，雲端已有的設定一律為準（不比修改時間） */
+  const preferRemote=!!(opt&&opt.preferRemoteOpts);
+  const optsReplaced=[];
   /* 匯入「以備份為準（還原已刪除）」：備份裡還在、本機標記刪除的品牌與紀錄，
      把備份那份的時間改成現在（並比刪除標記新），合併時就會蓋過刪除，同步後其他裝置也會恢復 */
   if(opt&&opt.restoreDeleted){
@@ -4266,21 +4275,25 @@ function applyRemotePayload(raw,opt){
     const d=data[id]||{};
     if(id===curBrand){
       records=purgeDeleted(mergeRecords(records,d.records||[]));
-      if(d.opts&&(d.opts.updatedAt||0)>(opts.updatedAt||0)){opts=d.opts;ensureSched();loadThemeObj();applyTheme();}
+      if(d.opts&&(preferRemote||(d.opts.updatedAt||0)>(opts.updatedAt||0))){
+        if(preferRemote&&stableStr(opts)!==stableStr(d.opts))optsReplaced.push((d.opts.store&&d.opts.store.name)||b.name||'');
+        opts=d.opts;ensureSched();loadThemeObj();applyTheme();
+      }
       saveRecords();
       try{localStorage.setItem(K_OPT(),JSON.stringify(opts));}catch(e){}
     }else{
       const merged=purgeDeleted(mergeRecords(loadJSON(K_REC(id),[]),d.records||[]));
       try{localStorage.setItem(K_REC(id),JSON.stringify(merged));}catch(e){}
       const lo=loadJSON(K_OPT(id),null);
-      if(d.opts&&(!lo||(d.opts.updatedAt||0)>(lo.updatedAt||0))){
+      if(d.opts&&(preferRemote||!lo||(d.opts.updatedAt||0)>(lo.updatedAt||0))){
+        if(preferRemote&&lo&&stableStr(lo)!==stableStr(d.opts))optsReplaced.push((d.opts.store&&d.opts.store.name)||b.name||'');
         try{localStorage.setItem(K_OPT(id),JSON.stringify(d.opts));}catch(e){}
       }
     }
   });
   saveBrandsLocal();
   ensureCurBrand();
-  return {restored:restored};
+  return {restored:restored,optsReplaced:optsReplaced};
 }
 function setSyncUI(state,msg){
   const dot=$('#syncDot');
@@ -4301,6 +4314,8 @@ async function syncNow(manual){
   if(syncing){syncPending=true;return;}
   syncPending=false;
   syncing=true;
+  /* 這台裝置上次「成功對到」的雲端備份；舊版沒有這個欄位，但同步過的就當作已對到目前的 gistId */
+  const prevGist=syncCfg.syncedGist||((syncCfg.last>0)?(syncCfg.gistId||''):'');
   setSyncUI('busy','同步中…');
   try{
     let remote=null;
@@ -4340,8 +4355,15 @@ async function syncNow(manual){
         }
       }else throw new Error('權杖無效（'+ls.status+'）');
     }
-    /* 合併 */
-    if(remote)applyRemotePayload(remote);
+    /* 合併：第一次對到這個雲端備份 → 設定以雲端為準（方案甲）；紀錄照舊逐筆合併 */
+    if(remote){
+      const first=(prevGist!==syncCfg.gistId);
+      const info=applyRemotePayload(remote,{preferRemoteOpts:first})||{optsReplaced:[]};
+      syncCfg.syncedGist=syncCfg.gistId; saveSync();
+      if(first&&info.optsReplaced.length){
+        addNotice('已改用雲端的設定（'+info.optsReplaced.filter(Boolean).join('、')+'）。這是這台裝置第一次同步，同步前在這台改過的設定沒有保留；客人備註、公休日、服務項目等都以雲端為準。');
+      }
+    }
     else{records=purgeDeleted(records);saveRecords();}
     /* [NEW] 上傳前二次確認：若下載之後雲端又被別台裝置更新過，
        先把對方的資料拉下來合併，避免整包覆蓋掉對方剛記的紀錄 */
@@ -4375,7 +4397,7 @@ async function syncNow(manual){
       const res=await gh('PATCH','/gists/'+syncCfg.gistId,{files:{[GIST_FILE]:{content:payload}}});
       if(!res.ok)throw new Error('上傳失敗 '+res.status);
     }
-    syncCfg.last=Date.now(); saveSync();
+    syncCfg.last=Date.now(); syncCfg.syncedGist=syncCfg.gistId; saveSync();
     setSyncUI('ok','上次同步：'+new Date(syncCfg.last).toLocaleString('zh-TW',{hour12:false}));
     if(manual)toast('同步完成 ☁️');
     if(curPage==='cal')renderCal();
