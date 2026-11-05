@@ -3908,6 +3908,183 @@ function normalizePayload(r){
   }
   return null;
 }
+/* ===== 外部資料（匯入 JSON／雲端）白名單驗證 =====
+   只留認得的欄位；金額、價格一律轉成 Number，轉不了就丟掉；色碼一律經過 normHex。
+   目的：別人的備份檔或被竄改的雲端資料，不能把程式碼塞進 innerHTML。
+   只清洗「內容」，設定（opts）的合併方式（updatedAt 較新者整份勝出）完全不變。 */
+const isObj=v=>!!v&&typeof v==='object'&&!Array.isArray(v);
+function toNum(v){
+  if(typeof v==='number')return isFinite(v)?v:null;
+  if(typeof v==='string'&&v.trim()!==''){const n=Number(v);return isFinite(n)?n:null;}
+  return null;
+}
+function toStr(v,max){
+  if(typeof v!=='string'&&typeof v!=='number')return '';
+  return String(v).slice(0,max||500);
+}
+const toTime=v=>{const t=toStr(v,5);return /^\d{1,2}:\d{2}$/.test(t)?t:'';};
+const isDateStr=v=>typeof v==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(v);
+const toStrArr=(a,max)=>Array.isArray(a)?a.filter(x=>typeof x==='string'||typeof x==='number').map(x=>toStr(x,max)):[];
+const clamp01=n=>Math.max(0,Math.min(1,n));
+/* {name,price}：價格不合法整項丟掉 */
+function cleanItem(it,needId){
+  if(!isObj(it))return null;
+  const price=toNum(it.price);
+  if(price==null)return null;
+  const o={name:toStr(it.name,100),price:price};
+  if(needId)o.id=toStr(it.id,64)||uid();
+  if(it.isMonthly===true)o.isMonthly=true;
+  if(it.isExtra===true)o.isExtra=true;
+  return o;
+}
+const cleanItems=(a,needId)=>Array.isArray(a)?a.map(x=>cleanItem(x,needId)).filter(Boolean):[];
+function cleanDiscount(d){
+  if(!isObj(d))return null;
+  const pct=toNum(d.pct);
+  return {label:toStr(d.label,100),pct:(pct!=null&&pct>0&&pct<=1)?pct:null,fixed:toNum(d.fixed)||0,custom:toNum(d.custom)||0};
+}
+function sanitizeRecord(r){
+  if(!isObj(r))return null;
+  const id=toStr(r.id,64);
+  if(!id)return null;
+  const updatedAt=toNum(r.updatedAt)||0;
+  const deleted=r.deleted===true;
+  /* 已刪除的墓碑就算內容壞了也要留著，刪除狀態才能同步到其他裝置 */
+  const tomb=()=>deleted?{id:id,type:'expense',date:'1970-01-01',amount:0,updatedAt:updatedAt,deleted:true}:null;
+  if(!['income','expense','booking'].includes(r.type)||!isDateStr(r.date))return tomb();
+  const o={id:id,type:r.type,date:r.date,updatedAt:updatedAt};
+  if(deleted)o.deleted=true;
+  if(r.type==='booking'){
+    o.name=toStr(r.name,100);
+    o.time=toTime(r.time);
+    o.channel=toStr(r.channel,50);
+    o.plans=cleanItems(r.plans,false);
+    if(r.plan){const pl=cleanItem(r.plan,false);if(pl)o.plan=pl;}
+    o.planNote=toStr(r.planNote,500);
+    const dep=toNum(r.deposit);
+    o.deposit=(dep!=null&&dep>0)?dep:0;
+    return o;
+  }
+  const amt=toNum(r.amount);
+  if(amt==null)return tomb();
+  o.amount=amt;
+  o.items=toStrArr(r.items,100);
+  o.discount=cleanDiscount(r.discount);
+  o.note=toStr(r.note,1000);
+  if(r.type==='expense'){
+    o.category=toStr(r.category,50);
+    return o;
+  }
+  const bd=isObj(r.breakdown)?r.breakdown:null;
+  if(bd)o.breakdown={base:cleanItem(bd.base,false),addons:cleanItems(bd.addons,false),removal:cleanItem(bd.removal,false)};
+  o.customer=toStr(r.customer,100);
+  const cr=toNum(r.commissionRate);
+  if(cr!=null)o.commissionRate=clamp01(cr);
+  o.bkTime=toTime(r.bkTime);
+  o.bkChannel=toStr(r.bkChannel,50);
+  o.fromBooking=r.fromBooking===true;
+  return o;
+}
+const sanitizeRecords=a=>Array.isArray(a)?a.map(sanitizeRecord).filter(Boolean):[];
+/* 自訂配色：每個色碼經過 normHex，不合法就丟掉、改用預設值補上，避免畫面壞掉 */
+function cleanThemeSet(c){
+  if(!isObj(c))return null;
+  const id=toStr(c.id,64);
+  if(!id)return null;
+  const D=THEME_SETS.dark;
+  const o={id:id,name:toStr(c.name,40)||'我的配色'};
+  Object.keys(D).forEach(k=>{
+    if(k==='name')return;
+    if(Array.isArray(D[k])){
+      const arr=Array.isArray(c[k])?c[k].map(normHex).filter(Boolean):[];
+      o[k]=arr.length?arr:D[k].slice();
+    }else{
+      o[k]=normHex(c[k])||D[k];
+    }
+  });
+  return o;
+}
+function cleanStrMap(m,maxK,maxV){
+  const o={};
+  if(isObj(m))Object.keys(m).forEach(k=>{const kk=toStr(k,maxK);if(kk)o[kk]=toStr(m[k],maxV);});
+  return o;
+}
+function sanitizeOpts(src){
+  if(!isObj(src))return null;
+  const o={updatedAt:toNum(src.updatedAt)||0};
+  ['base','addon','removal'].forEach(k=>{o[k]=cleanItems(src[k],true);});
+  if(Array.isArray(src.bookSvc))o.bookSvc=cleanItems(src.bookSvc,true);
+  if(isObj(src.expCats)){
+    o.expCats={};
+    Object.keys(src.expCats).forEach(k=>{const kk=toStr(k,50);if(kk)o.expCats[kk]=toStrArr(src.expCats[k],50);});
+  }
+  if(isObj(src.sched)){
+    const sc=src.sched, days={};
+    if(isObj(sc.days))Object.keys(sc.days).forEach(ds=>{
+      const v=sc.days[ds];
+      if(!isDateStr(ds)||!isObj(v))return;
+      if(v.off===true)days[ds]={off:true};
+      else if(Array.isArray(v.slots))days[ds]={slots:v.slots.map(toTime).filter(Boolean)};
+    });
+    o.sched={slots:Array.isArray(sc.slots)?sc.slots.map(toTime).filter(Boolean):['11:00','15:00','19:00'],days:days};
+    if(sc.footer!=null)o.sched.footer=toStr(sc.footer,2000);
+    if(sc.font!=null)o.sched.font=(sc.font==='inherit'||FONT_OPTIONS.some(f=>f[0]===sc.font))?sc.font:'system';
+    if(sc.themeSet!=null)o.sched.themeSet=toStr(sc.themeSet,64)||'inherit';
+    const pa=toNum(sc.panelAlpha);
+    if(pa!=null)o.sched.panelAlpha=clamp01(pa);
+  }
+  if(isObj(src.look)){
+    const lk=src.look;
+    const ca=toNum(lk.cardAlpha);
+    o.look={set:toStr(lk.set,64)||'dark',cardAlpha:ca!=null?clamp01(ca):1,
+      customSets:Array.isArray(lk.customSets)?lk.customSets.map(cleanThemeSet).filter(Boolean):[]};
+    /* 舊版欄位：仍交給 ensureSched 遷移，但先把色碼洗乾淨 */
+    ['color','btn','textTitle','textBody'].forEach(k=>{if(lk[k]!=null)o.look[k]=normHex(lk[k])||'';});
+    if(lk.font!=null&&FONT_OPTIONS.some(f=>f[0]===lk.font))o.look.font=lk.font;
+  }
+  if(isObj(src.store)){
+    const logo=typeof src.store.logo==='string'&&/^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+\/=]+$/.test(src.store.logo)?src.store.logo:'';
+    o.store={name:toStr(src.store.name,60),logo:logo};
+  }
+  if(isObj(src.commission)){
+    const c=src.commission;
+    o.commission={enabled:c.enabled===true,rate:clamp01(toNum(c.rate)||0)};
+    const lr=toNum(c.legacyRate);
+    if(lr!=null)o.commission.legacyRate=clamp01(lr);
+    const cap=toNum(c.monthlyCap);
+    o.commission.monthlyCap=(cap!=null&&cap>=0)?Math.round(cap):null;
+  }
+  if(src.custNotes!=null)o.custNotes=cleanStrMap(src.custNotes,100,2000);
+  if(src.custCommission!=null){
+    o.custCommission={};
+    if(isObj(src.custCommission))Object.keys(src.custCommission).forEach(k=>{
+      const kk=toStr(k,100), v=toNum(src.custCommission[k]);
+      if(kk&&v!=null)o.custCommission[kk]=clamp01(v);
+    });
+  }
+  if(src.mig_xiejia===true)o.mig_xiejia=true;
+  if(src.mig3===true)o.mig3=true;
+  return o;
+}
+function sanitizePayload(r){
+  if(!r)return null;
+  const brandsIn=Array.isArray(r.brands)?r.brands:[];
+  const out={brands:[],data:{}};
+  brandsIn.forEach(b=>{
+    if(!isObj(b))return;
+    const id=toStr(b.id,64);
+    if(!id)return;
+    const x={id:id,name:toStr(b.name,60),updatedAt:toNum(b.updatedAt)||0};
+    if(b.deleted===true)x.deleted=true;
+    out.brands.push(x);
+  });
+  if(isObj(r.data))Object.keys(r.data).forEach(id=>{
+    const d=r.data[id];
+    if(!isObj(d))return;
+    out.data[id]={records:sanitizeRecords(d.records),opts:sanitizeOpts(d.opts)};
+  });
+  return out;
+}
 function collectAll(){
   const data={};
   aliveBrands().forEach(b=>{
@@ -3917,7 +4094,7 @@ function collectAll(){
   return data;
 }
 function applyRemotePayload(raw){
-  const r=normalizePayload(raw);
+  const r=sanitizePayload(normalizePayload(raw));
   if(!r)return;
   brands=purgeBrands(mergeBrands(brands,r.brands||[]));
   const data=r.data||{};
