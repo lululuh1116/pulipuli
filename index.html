@@ -1611,12 +1611,17 @@ function periodFilter(){
   if(repPer==='year'){const p=y+'-';return{label:y+'年',test:r=>r.date.startsWith(p)};}
   const p=y+'-'+pad(m+1);return{label:y+'年'+(m+1)+'月',test:r=>r.date.startsWith(p)};
 }
-function shiftRepDate(dir){
-  const d=new Date(repDate);
-  if(repPer==='day')d.setDate(d.getDate()+dir);
-  else if(repPer==='month')d.setMonth(d.getMonth()+dir);
+/* 月／年加減前一律先設成每月 1 日：否則 1/31 +1 月 = 2/31 → 3/3，會跳過 2 月 */
+function shiftPeriod(base,per,dir){
+  const d=new Date(base);
+  if(per==='day'){d.setDate(d.getDate()+dir);return d;}
+  d.setDate(1);
+  if(per==='month')d.setMonth(d.getMonth()+dir);
   else d.setFullYear(d.getFullYear()+dir);
-  repDate=d; renderRep();
+  return d;
+}
+function shiftRepDate(dir){
+  repDate=shiftPeriod(repDate,repPer,dir); renderRep();
 }
 $('#repPrev').onclick=()=>shiftRepDate(-1);
 $('#repNext').onclick=()=>shiftRepDate(1);
@@ -1696,10 +1701,7 @@ function renderRep(){
   const visits=rs.filter(r=>r.type==='income').length;
   const avg=visits?Math.round(inSum/visits):0;
   /* [NEW] 同期比較：與上一期（前一日／月／年）的收入與來客數對照 */
-  const pd=new Date(repDate);
-  if(repPer==='day')pd.setDate(pd.getDate()-1);
-  else if(repPer==='month')pd.setMonth(pd.getMonth()-1);
-  else pd.setFullYear(pd.getFullYear()-1);
+  const pd=shiftPeriod(repDate,repPer,-1);
   let ptest,plabel;
   {
     const y2=pd.getFullYear(),m2=pd.getMonth();
