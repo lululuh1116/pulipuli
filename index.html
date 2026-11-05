@@ -378,6 +378,13 @@ main{padding:14px 16px 120px;max-width:560px;margin:0 auto}
   transition:opacity .25s,transform .25s;white-space:nowrap;box-shadow:var(--shadow);
 }
 .toast.show{opacity:1;transform:translateX(-50%)}
+/* 存檔失敗的常駐警示（存檔恢復成功才會消失） */
+#saveErrBanner{
+  display:none;margin:0 0 8px;padding:9px 14px;border-radius:12px;
+  background:var(--red);color:#fff;font-size:13px;font-weight:700;line-height:1.5;text-align:center;
+  box-shadow:var(--shadow-sm);
+}
+#saveErrBanner.show{display:block}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
 </head>
@@ -385,6 +392,7 @@ main{padding:14px 16px 120px;max-width:560px;margin:0 auto}
 <div id="bgLayer" style="position:fixed;inset:0;z-index:-1;background-size:cover;background-position:center;pointer-events:none"></div>
 
 <header class="app">
+  <div id="saveErrBanner" role="alert"></div>
   <div class="brand-row">
     <div class="brand" id="brandBtn" role="button" tabindex="0" aria-label="切換品牌"><span id="brandLogo"></span><span class="brand-text"><h1 id="brandName">PuliPuli.Studio</h1><span class="sub" id="brandSub">美甲記帳</span></span><span class="brand-caret">▾</span></div>
     <div class="head-actions">
@@ -592,7 +600,10 @@ const money=n=>{
 };
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
 const WD=['日','一','二','三','四','五','六'];
+let saveFailedNow=false;   /* 這一輪（同一個動作）是否剛存檔失敗，見 markSave() */
 function toast(msg){
+  /* 同一個動作裡剛存檔失敗，就不要再跳「已儲存／已記錄…」這類成功提示，免得誤會 */
+  if(saveFailedNow&&!/^⚠️/.test(msg)&&/已|完成|成功/.test(msg))return;
   const t=$('#toast'); t.textContent=msg; t.classList.add('show');
   clearTimeout(t._tm); t._tm=setTimeout(()=>t.classList.remove('show'),2200);
 }
@@ -967,12 +978,27 @@ let opts=loadJSON(K_OPT(),null)||JSON.parse(JSON.stringify(DEFAULT_OPTS));
 let syncCfg=loadJSON(LS_SYNC,{token:'',gistId:'',last:0});
 
 function loadJSON(k,fb){try{const v=localStorage.getItem(k);return v?JSON.parse(v):fb}catch(e){return fb}}
-/* [NEW] 儲存空間滿時（背景圖佔用過多）不再靜默失敗，明確警告使用者 */
-function saveRecords(){
-  try{localStorage.setItem(K_REC(),JSON.stringify(records))}
-  catch(e){toast('⚠️ 儲存空間已滿，紀錄可能沒存到！請到設定移除背景圖後重試')}
+/* 儲存空間滿時（背景圖佔用過多）不再靜默失敗：
+   頂部顯示常駐紅色警示，直到之後存檔成功才收起；同一個動作裡也不再跳成功提示 */
+const saveFail={rec:false,opt:false};
+function markSave(kind,ok){
+  saveFail[kind]=!ok;
+  if(!ok){saveFailedNow=true;setTimeout(()=>{saveFailedNow=false;},0);}
+  const b=document.getElementById('saveErrBanner');
+  if(!b)return;
+  const what=[saveFail.rec?'紀錄':'',saveFail.opt?'設定':''].filter(Boolean).join('與');
+  b.textContent=what?'⚠️ 存檔失敗：這台裝置的儲存空間已滿，剛才的'+what+'可能沒有存到。請到設定移除背景圖後再操作一次。':'';
+  b.classList.toggle('show',!!what);
 }
-function saveOpts(){opts.updatedAt=Date.now();localStorage.setItem(K_OPT(),JSON.stringify(opts))}
+function saveRecords(){
+  try{localStorage.setItem(K_REC(),JSON.stringify(records));markSave('rec',true);return true;}
+  catch(e){markSave('rec',false);return false;}
+}
+function saveOpts(){
+  opts.updatedAt=Date.now();
+  try{localStorage.setItem(K_OPT(),JSON.stringify(opts));markSave('opt',true);return true;}
+  catch(e){markSave('opt',false);return false;}
+}
 function saveSync(){localStorage.setItem(LS_SYNC,JSON.stringify(syncCfg))}
 const live=()=>records.filter(r=>!r.deleted);
 
