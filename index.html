@@ -165,7 +165,9 @@ main{padding:14px 16px 120px;max-width:560px;margin:0 auto}
 .rec-li .amt{font-weight:800;font-size:14.5px;white-space:nowrap}
 .rec-li .amt.in{color:var(--in-deep,var(--brown))}
 .rec-li .amt.ex{color:var(--red)}
-.rec-li .del{font-size:15px;padding:6px;opacity:.65}
+.rec-li .del{font-size:15px;padding:6px;opacity:.65;min-height:40px;min-width:40px}
+/* 手機上好按：日期面板的小按鈕至少 40px 高 */
+.day-panel .mini-btn{min-height:40px}
 
 /* FAB */
 .fab{
@@ -388,6 +390,20 @@ main{padding:14px 16px 120px;max-width:560px;margin:0 auto}
   box-shadow:var(--shadow-sm);
 }
 #saveErrBanner.show{display:block}
+/* 常駐通知（例如品牌在其他裝置被刪除），按「知道了」才收起 */
+#noticeBanner{
+  display:none;margin:0 0 8px;padding:10px 14px;border-radius:12px;
+  background:var(--bk-bg,#F7F0DC);border:1px solid var(--bk-line,#E7DAB5);color:var(--ink-body,#2B2356);
+  font-size:13px;line-height:1.55;box-shadow:var(--shadow-sm);
+}
+#noticeBanner.show{display:block}
+#noticeBanner .nb-row{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;padding:2px 0}
+#noticeBanner .nb-row span{flex:1 1 200px}
+#noticeBanner .nb-btn,#noticeBanner .nb-close{
+  min-height:36px;padding:6px 12px;border-radius:999px;font-size:12.5px;font-weight:700;
+  background:var(--card,#fff);color:var(--brown-2,#3A3E6C);box-shadow:var(--shadow-sm);
+}
+#noticeBanner .nb-close{display:block;margin:6px 0 0 auto}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
 </head>
@@ -396,6 +412,7 @@ main{padding:14px 16px 120px;max-width:560px;margin:0 auto}
 
 <header class="app">
   <div id="saveErrBanner" role="alert"></div>
+  <div id="noticeBanner" role="status"></div>
   <div class="brand-row">
     <div class="brand" id="brandBtn" role="button" tabindex="0" aria-label="切換品牌"><span id="brandLogo"></span><span class="brand-text"><h1 id="brandName">PuliPuli.Studio</h1><span class="sub" id="brandSub">美甲記帳</span></span><span class="brand-caret">▾</span></div>
     <div class="head-actions">
@@ -868,7 +885,7 @@ function deleteBrand(id){
   if(aliveBrands().length<=1){toast('至少要保留一個品牌');return;}
   const b=brands.find(x=>x.id===id); if(!b)return;
   const nm=brandName(id);
-  if(!confirm('刪除品牌「'+nm+'」？\n這個品牌的所有紀錄與設定都會刪除，其他裝置同步後也會一起刪除。'))return;
+  if(!confirm('刪除品牌「'+nm+'」？\n這個品牌的所有紀錄與設定都會刪除，其他裝置同步後也會一起刪除，其他手機尚未同步的紀錄也會消失。'))return;
   if(!confirm('再確認一次：「'+nm+'」的資料無法復原。'))return;
   b.deleted=true; b.updatedAt=Date.now();
   [K_REC(id),K_OPT(id),K_THEME(id),K_SCHEDBG(id)].forEach(k=>localStorage.removeItem(k));
@@ -884,15 +901,79 @@ function mergeBrands(a,b){
     if(!old||(x.updatedAt||0)>(old.updatedAt||0))map[x.id]=Object.assign({},x);
   });
   const arr=Object.values(map);
-  /* 在別台裝置被刪掉的品牌，本機資料一併清掉 */
+  /* 在別台裝置被刪掉的品牌，本機資料一併清掉；清之前若有還沒同步的紀錄，先下載備份 */
   arr.forEach(x=>{
-    if(x.deleted)[K_REC(x.id),K_OPT(x.id),K_THEME(x.id),K_SCHEDBG(x.id)].forEach(k=>localStorage.removeItem(k));
+    if(!x.deleted)return;
+    rescueDeletedBrand(x);
+    [K_REC(x.id),K_OPT(x.id),K_THEME(x.id),K_SCHEDBG(x.id)].forEach(k=>localStorage.removeItem(k));
   });
   return arr;
 }
-/* 品牌墓碑保留 90 天，讓其他裝置有時間同步到「已刪除」 */
+/* 下載文字檔（JSON 備份用） */
+function downloadText(text,filename){
+  const blob=new Blob([text],{type:'application/json'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download=filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href),60000);
+}
+/* 品牌在別台裝置被刪：本機若有「上次同步之後」才新增或修改的紀錄，先整包匯出成 JSON 下載，
+   之後可用「匯入 JSON」救回（匯出的品牌時間設成現在，匯入時會蓋過刪除標記） */
+function rescueDeletedBrand(x){
+  const isCur=(x.id===curBrand);
+  const recs=isCur?records:loadJSON(K_REC(x.id),null);
+  if(!Array.isArray(recs))return;          /* 本機沒有這個品牌的資料（例如就是在這台刪的） */
+  const last=(syncCfg&&syncCfg.last)||0;
+  /* >=：跟打包時間同一毫秒改的也算還沒同步（寧可多救，不要漏） */
+  const unsynced=recs.filter(r=>r&&!r.deleted&&(last===0||(r.updatedAt||0)>=last));
+  if(!unsynced.length)return;
+  const o=isCur?opts:loadJSON(K_OPT(x.id),null);
+  const name=(o&&o.store&&o.store.name)||x.name||'未命名品牌';
+  /* 品牌時間要比刪除標記新，匯入時才會蓋過刪除（兩台手機時鐘可能有落差） */
+  const stamp=Math.max(Date.now(),(x.updatedAt||0)+1);
+  const json=JSON.stringify({
+    brands:[{id:x.id,name:name,updatedAt:stamp}],
+    data:{[x.id]:{records:recs,opts:o}},
+    exportedAt:new Date().toISOString(),
+    note:'這個品牌在其他裝置被刪除前，這台手機還沒同步的資料'
+  },null,2);
+  /* 檔名只用英數（品牌 id），部分瀏覽器遇到中文檔名會改成 download */
+  const fname='pulipuli-rescue-'+String(x.id).replace(/[^A-Za-z0-9_-]/g,'')+'-'+fmtD(new Date())+'.json';
+  const dl=()=>downloadText(json,fname);
+  try{dl();}catch(e){}
+  addNotice('⚠️ 品牌「'+name+'」已在其他裝置刪除。這台手機有 '+unsynced.length+' 筆還沒同步的紀錄，已先下載成備份檔「'+fname+'」。需要時到設定 → 雲端同步 → 匯入 JSON 就能救回；注意：匯入後這個品牌會在所有手機恢復（包含刪除它的那台）。',
+    {label:'再下載一次',fn:dl});
+}
+/* 常駐通知橫幅：不會自己消失，按「知道了」才收起；文字一律用 textContent，不拼進 innerHTML */
+const notices=[];
+function addNotice(text,action){notices.push({text:text,action:action||null});renderNotices();}
+function renderNotices(){
+  const b=document.getElementById('noticeBanner');
+  if(!b)return;
+  b.textContent='';
+  if(!notices.length){b.classList.remove('show');return;}
+  notices.forEach(n=>{
+    const row=document.createElement('div'); row.className='nb-row';
+    const t=document.createElement('span'); t.textContent=n.text; row.appendChild(t);
+    if(n.action){
+      const btn=document.createElement('button'); btn.className='nb-btn';
+      btn.textContent=n.action.label; btn.onclick=n.action.fn; row.appendChild(btn);
+    }
+    b.appendChild(row);
+  });
+  const c=document.createElement('button'); c.className='nb-close'; c.textContent='知道了';
+  c.onclick=()=>{notices.length=0;renderNotices();};
+  b.appendChild(c);
+  b.classList.add('show');
+}
+/* 刪除標記（墓碑）保留 1 年：讓其他裝置有時間同步到「已刪除」，
+   也讓一年內的舊備份用「合併」匯入時，已刪除的紀錄與品牌不會復活。
+   （不用「清理水位時間」：很久以前建立、之後沒改過的正常紀錄修改時間也很舊，會被誤擋而掉資料） */
+const TOMB_KEEP_MS=365*864e5;
+/* 品牌墓碑保留期同上 */
 function purgeBrands(arr){
-  const cutoff=Date.now()-90*864e5;
+  const cutoff=Date.now()-TOMB_KEEP_MS;
   return arr.filter(b=>!(b&&b.deleted&&(b.updatedAt||0)<cutoff));
 }
 function ensureCurBrand(){
@@ -910,9 +991,10 @@ function ensureCurBrand(){
     return;
   }
   if(!a.some(b=>b.id===curBrand)){
+    const oldName=(opts&&opts.store&&opts.store.name)||'目前的品牌';
     curBrand=a[0].id; localStorage.setItem(LS_CURB,curBrand);
     loadBrandData(); go(curPage);
-    toast('目前品牌已在其他裝置刪除，已切換到「'+brandName(curBrand)+'」');
+    addNotice('目前的品牌「'+oldName+'」已在其他裝置刪除，已切換到「'+brandName(curBrand)+'」。');
   }
 }
 function closeBrandSheet(){
@@ -936,7 +1018,7 @@ function openBrandSheet(){
       const tag=document.createElement('span'); tag.className='tag'; tag.textContent='使用中 ✓';
       row.appendChild(tag);
     }else{
-      const cnt=loadJSON(K_REC(b.id),[]).filter(r=>r&&!r.deleted).length;
+      const cnt=loadJSON(K_REC(b.id),[]).filter(r=>r&&!r.deleted&&REC_TYPES.indexOf(r.type)>=0).length;
       const tag=document.createElement('span'); tag.className='tag'; tag.textContent=cnt+' 筆';
       row.appendChild(tag);
       const rm=document.createElement('button'); rm.className='rm'; rm.textContent='刪除';
@@ -993,8 +1075,15 @@ function markSave(kind,ok){
   b.textContent=what?'⚠️ 存檔失敗：這台裝置的儲存空間已滿，剛才的'+what+'可能沒有存到。請到設定移除背景圖後再操作一次。':'';
   b.classList.toggle('show',!!what);
 }
+/* 同一支手機開兩個分頁時，各自記憶體裡的 records 會互相蓋掉：
+   存檔前先讀回 localStorage 裡的版本，用 mergeRecords（逐筆比 updatedAt）合併後再寫回 */
 function saveRecords(){
-  try{localStorage.setItem(K_REC(),JSON.stringify(records));markSave('rec',true);return true;}
+  try{
+    const stored=loadJSON(K_REC(),[]);
+    /* 記憶體版本放前面：時間相同時以這個分頁為準，另一個分頁較新的才會蓋過來 */
+    if(Array.isArray(stored)&&stored.length)records=purgeDeleted(mergeRecords(records,stored));
+    localStorage.setItem(K_REC(),JSON.stringify(records));markSave('rec',true);return true;
+  }
   catch(e){markSave('rec',false);return false;}
 }
 function saveOpts(){
@@ -1003,7 +1092,17 @@ function saveOpts(){
   catch(e){markSave('opt',false);return false;}
 }
 function saveSync(){localStorage.setItem(LS_SYNC,JSON.stringify(syncCfg))}
-const live=()=>records.filter(r=>!r.deleted);
+/* 畫面、報表、統計只看認得的紀錄類型；別台新版才有的類型原樣保留在資料裡，但絕不畫到畫面上 */
+const REC_TYPES=['income','expense','booking'];
+const live=()=>records.filter(r=>!r.deleted&&REC_TYPES.indexOf(r.type)>=0);
+/* 這筆紀錄是否已在別處被刪除：記憶體（含同步、其他分頁合併進來的）或本機儲存裡較新的版本已標記刪除 */
+function deletedElsewhere(id){
+  const m=records.find(x=>x.id===id);
+  if(!m||m.deleted)return true;
+  const st=loadJSON(K_REC(),[]);
+  const s=Array.isArray(st)?st.find(x=>x&&x.id===id):null;
+  return !!(s&&s.deleted&&(s.updatedAt||0)>=(m.updatedAt||0));
+}
 
 /* ========= 外觀主題（配色雲端同步，字體與背景圖只存這台裝置） ========= */
 const LS_THEME='pp_theme';
@@ -1548,6 +1647,11 @@ function customerCommissionRate(name){
   }
   return c.rate;
 }
+/* 客人備註：只讀物件自己的欄位，避免名稱是 constructor 時讀到內建函式 */
+function custNote(name){
+  const m=opts.custNotes;
+  return (m&&Object.prototype.hasOwnProperty.call(m,name)&&typeof m[name]==='string')?m[name]:'';
+}
 function newIncomeCommissionRate(customer){return customerCommissionRate(customer);}
 /* 已存收入優先讀取該筆快照；舊版沒有 commissionRate 的收入固定用 legacyRate，不跟著未來預設率變動 */
 function recordCommissionRate(r){
@@ -1758,7 +1862,7 @@ function renderRep(){
       :'');
 
   /* 服務佔比 */
-  const svcMap={};
+  const svcMap=Object.create(null);   /* 沒有原型：客人／服務名稱是 __proto__、constructor 也不會出事 */
   rs.forEach(r=>{
     if(r.type!=='income')return;
     const name=r.breakdown&&r.breakdown.base?r.breakdown.base.name:'其他';
@@ -1792,7 +1896,7 @@ function renderRep(){
   $('#repBars').innerHTML='<svg width="100%" viewBox="0 0 '+W+' '+H+'" role="img">'+bars+'</svg>';
 
   /* 常客排行（全期間累積） */
-  const vipMap={};
+  const vipMap=Object.create(null);
   live().forEach(r=>{
     if(r.type!=='income')return;
     let name=r.customer||'';
@@ -1809,7 +1913,7 @@ function renderRep(){
     ? vips.map((v,i)=>
         '<div data-cust="'+esc(v.name)+'" style="display:flex;align-items:center;gap:10px;padding:8px 2px;border-bottom:1px solid var(--line);font-size:14px;cursor:pointer">'+
         '<span style="width:26px;text-align:center">'+(medals[i]||(i+1))+'</span>'+
-        '<span style="flex:1;font-weight:700">'+esc(v.name)+((opts.custNotes&&opts.custNotes[v.name])?' 📝':'')+'</span>'+
+        '<span style="flex:1;font-weight:700">'+esc(v.name)+(custNote(v.name)?' 📝':'')+'</span>'+
         '<span style="color:var(--brown-soft);font-size:12px">'+v.n+' 次</span>'+
         '<span style="font-weight:700;color:var(--accent-deep)">'+money(v.sum)+'</span>'+
         '</div>').join('')+
@@ -1833,7 +1937,7 @@ function openCustomer(name){
   const ta=document.createElement('textarea');
   ta.className='inline-input wide'; ta.rows=3;
   ta.style.cssText='width:100%;resize:vertical;line-height:1.6';
-  ta.value=(opts.custNotes&&opts.custNotes[name])||'';
+  ta.value=custNote(name);
   ta.onchange=()=>{
     if(!opts.custNotes)opts.custNotes={};
     if(ta.value.trim())opts.custNotes[name]=ta.value.trim();
@@ -2061,6 +2165,8 @@ function prefillIncome(r){
   const findBy=(arr,it)=>arr.find(o=>o.name===it.name&&o.price===it.price)||arr.find(o=>o.name===it.name);
   /* [FIX] 補上 extraName、monthlyName，避免編輯後按 OK 時 undefined.trim() 閃退 */
   inSel={base:null,addons:[],extra:'',extraName:'',removal:null,freeRemoval:false,pct:null,fixed:null,custom:'',note:r.note||'',customer:r.customer||'',monthly:'',monthlyName:'',commissionRate:String(Math.round(recordCommissionRate(r)*1000)/10)};
+  /* 結帳時收的訂金：編輯時回填，底部才會照樣顯示「已收訂金／現場應收」 */
+  inSel.depositPaid=(typeof r.deposit==='number'&&r.deposit>0)?r.deposit:0;
   exSel={cat:Object.keys(opts.expCats)[0],items:[],other:'',note:''};
   calcExpr='';
   if(bd.base){
@@ -2601,7 +2707,19 @@ function renderExpense(body){
 /* ---- OK 記錄 ---- */
 $('#okBtn').onclick=()=>{
   const wasEditing=editingId;
-  const save=rec=>{ if(wasEditing)updateRecord(wasEditing,rec); else addRecord(rec); };
+  /* 編輯中的這筆已在其他裝置（或另一個分頁）被刪除：不要默默救回來，先問；預設放棄 */
+  let recreate=false;
+  if(wasEditing&&deletedElsewhere(wasEditing)){
+    if(confirm('這筆已在其他裝置刪除。\n\n按「確定」：放棄這次修改（建議）\n按「取消」：用目前填的內容重新建一筆新的紀錄')){
+      checkoutBkInfo=null;
+      closeEntry(); go(curPage);
+      toast('已放棄修改：這筆已在其他裝置刪除');
+      return;
+    }
+    recreate=true;
+  }
+  const editingNow=!!(wasEditing&&!recreate);
+  const save=rec=>{ if(editingNow)updateRecord(wasEditing,rec); else addRecord(rec); };
   if(entryMode==='income'){
     const mo=parseFloat(inSel.monthly);
     /* [FIX] monthlyName/extraName 加 (||'') 防呆，優惠款加 isMonthly 旗標供編輯時辨識 */
@@ -2633,9 +2751,11 @@ $('#okBtn').onclick=()=>{
       commissionRate:(()=>{let p=Number(inSel.commissionRate);if(!isFinite(p))p=0;return Math.max(0,Math.min(1,p/100));})(),
       bkTime:(checkoutBkInfo&&checkoutBkInfo.bkTime)||'',
       bkChannel:(checkoutBkInfo&&checkoutBkInfo.bkChannel)||'',
-      fromBooking:!!checkoutBkInfo
+      fromBooking:!!checkoutBkInfo,
+      /* 結帳時已收的訂金（金額仍記全額，訂金也是收入） */
+      deposit:(inSel.depositPaid>0)?inSel.depositPaid:0
     });
-    toast(wasEditing?'已更新紀錄 '+money(incomeTotal()):'已記錄收入 '+money(incomeTotal()));
+    toast(editingNow?'已更新紀錄 '+money(incomeTotal()):'已記錄收入 '+money(incomeTotal()));
     checkoutBkInfo=null;
   }else if(entryMode==='expense'){
     const amt=calcTotal();
@@ -2646,7 +2766,7 @@ $('#okBtn').onclick=()=>{
       type:'expense', date:editDate, amount:amt,
       category:exSel.cat, items:items, discount:null, note:exSel.note.trim()
     });
-    toast(wasEditing?'已更新紀錄 '+money(amt):'已記錄支出 '+money(amt));
+    toast(editingNow?'已更新紀錄 '+money(amt):'已記錄支出 '+money(amt));
   }
   if(entryMode==='booking'){
     if(!bkSel.name.trim())return;
@@ -2682,7 +2802,7 @@ $('#okBtn').onclick=()=>{
       planNote:bkSel.planNote.trim(),
       deposit:(!isNaN(dep)&&dep>0)?dep:0
     });
-    toast(wasEditing?'已更新預約':'已新增預約：'+bkSel.name.trim());
+    toast(editingNow?'已更新預約':'已新增預約：'+bkSel.name.trim());
   }
   /* 存完讓月曆（與總紀錄的週次）跳到這筆的日期 */
   const savedDate=editDate;
@@ -3038,7 +3158,7 @@ async function exportReport(){
   const finalNet=netRevenue-exSum;
   const visits=rs.filter(r=>r.type==='income').length;
   const avg=visits?Math.round(inSum/visits):0;
-  const svcMap={};
+  const svcMap=Object.create(null);   /* 沒有原型：客人／服務名稱是 __proto__、constructor 也不會出事 */
   rs.forEach(r=>{
     if(r.type!=='income')return;
     const name=r.breakdown&&r.breakdown.base?r.breakdown.base.name:'其他';
@@ -3055,7 +3175,7 @@ async function exportReport(){
     if(r.date.slice(0,4)!=String(yNow))return;
     counts[parseInt(r.date.slice(5,7),10)-1]++;
   });
-  const vipMap={};
+  const vipMap=Object.create(null);
   live().forEach(r=>{
     if(r.type!=='income')return;
     let name=r.customer||'';
@@ -3790,6 +3910,23 @@ function buildSyncTab(body){
   const eNote=document.createElement('div'); eNote.className='note-mini';
   eNote.textContent='匯出的備份包含所有品牌；匯入時會依品牌合併，不會蓋掉其他品牌的資料。';
   card.appendChild(eNote);
+  /* 匯入方式：預設合併；「以備份為準」會把本機已刪除、備份裡還在的紀錄取消刪除 */
+  importMode='merge';
+  const imF=document.createElement('div'); imF.className='field';
+  const imL=document.createElement('label'); imL.textContent='匯入 JSON 的方式'; imF.appendChild(imL);
+  [['merge','合併（預設）'],['restore','以備份為準（還原已刪除）']].forEach(([v,lab])=>{
+    const row=document.createElement('label'); row.className='check-row';
+    row.style.cssText='display:flex;align-items:center;margin-top:8px;font-weight:600;min-height:32px';
+    const rb=document.createElement('input'); rb.type='radio'; rb.name='importMode'; rb.value=v; rb.checked=(importMode===v);
+    rb.onchange=()=>{if(rb.checked)importMode=v;};
+    row.appendChild(rb); row.appendChild(document.createTextNode(lab));
+    imF.appendChild(row);
+  });
+  const imN=document.createElement('div'); imN.className='note-mini';
+  imN.textContent='合併：備份裡的紀錄會加進來，這台手機比較新的修改會保留；但合併無法復原已刪除的紀錄。'+
+    '以備份為準：備份裡有、這台手機已刪除的紀錄（和品牌）會取消刪除，同步後其他手機也會跟著恢復。';
+  imF.appendChild(imN);
+  card.appendChild(imF);
   body.appendChild(card);
 
   const saveToken=()=>{
@@ -3847,18 +3984,24 @@ $('#bgFile').onchange=e=>{
   fr.readAsDataURL(f);
 };
 
+let importMode='merge';
 $('#importFile').onchange=e=>{
   const f=e.target.files[0]; if(!f)return;
+  const restore=(importMode==='restore');
   const rd=new FileReader();
   rd.onload=()=>{
     try{
       const p=normalizePayload(JSON.parse(rd.result));
       if(!p)throw 0;
-      applyRemotePayload(p);
+      const st=applyRemotePayload(p,{restoreDeleted:restore})||{restored:0};
       scheduleSync();
       loadBrandData(); go(curPage);
-      toast('匯入完成，共 '+(p.brands||[]).filter(b=>!b.deleted).length+' 個品牌');
+      toast('匯入完成，共 '+(p.brands||[]).filter(b=>!b.deleted).length+' 個品牌'+(restore?'，還原 '+st.restored+' 筆已刪除的紀錄':''));
     }catch(err){toast('檔案格式不正確，匯入失敗');}
+    /* 用完回到預設的「合併」，避免下次匯入誤用 */
+    importMode='merge';
+    const rm=document.querySelector('input[name=importMode][value=merge]');
+    if(rm)rm.checked=true;
   };
   rd.readAsText(f);
   e.target.value='';
@@ -3867,8 +4010,10 @@ $('#importFile').onchange=e=>{
 /* ========= GitHub Gist 同步引擎 ========= */
 const GIST_FILE='pulipuli-data.json';
 let syncTimer=null, syncing=false;
+let syncPending=false;   /* 同步進行中又有新改動：這次同步結束後自動再同步一次 */
 function scheduleSync(){
   if(!syncCfg||!syncCfg.token)return;
+  if(syncing)syncPending=true;
   clearTimeout(syncTimer);
   syncTimer=setTimeout(()=>syncNow(false),2000);
 }
@@ -3892,10 +4037,9 @@ function mergeRecords(a,b){
   });
   return Object.values(map);
 }
-/* [NEW] 已刪除超過 90 天的紀錄真正移除，避免資料與同步 payload 無限長大。
-   保留 90 天的墓碑是為了讓其他裝置有充分時間同步到「已刪除」狀態 */
+/* 已刪除超過 1 年（TOMB_KEEP_MS）的紀錄真正移除，避免資料與同步內容無限長大 */
 function purgeDeleted(arr){
-  const cutoff=Date.now()-90*864e5;
+  const cutoff=Date.now()-TOMB_KEEP_MS;
   return arr.filter(r=>!(r&&r.deleted&&(r.updatedAt||0)<cutoff));
 }
 /* 舊格式（單一品牌 {records,opts}）自動包成 b_main，換裝置或舊備份都接得回來 */
@@ -3908,11 +4052,27 @@ function normalizePayload(r){
   }
   return null;
 }
-/* ===== 外部資料（匯入 JSON／雲端）白名單驗證 =====
-   只留認得的欄位；金額、價格一律轉成 Number，轉不了就丟掉；色碼一律經過 normHex。
-   目的：別人的備份檔或被竄改的雲端資料，不能把程式碼塞進 innerHTML。
+/* ===== 外部資料（匯入 JSON／雲端）驗證 =====
+   認得的欄位一律驗證型別：金額、價格轉成 Number，轉不了就丟掉；色碼一律經過 normHex。
+   不認得的欄位（例如別台裝置先升級新增的欄位）原樣保留、跟著存檔與同步，
+   但程式只讀認得的欄位，所以這些欄位絕不會被拼進畫面（innerHTML）。
+   目的：別人的備份檔或被竄改的雲端資料，不能把程式碼塞進畫面；新版欄位也不會在舊版裝置被丟掉。
    只清洗「內容」，設定（opts）的合併方式（updatedAt 較新者整份勝出）完全不變。 */
 const isObj=v=>!!v&&typeof v==='object'&&!Array.isArray(v);
+const UNSAFE_KEYS=['__proto__','constructor','prototype'];
+const cloneJSON=v=>{try{return JSON.parse(JSON.stringify(v));}catch(e){return undefined;}};
+/* 把 src 裡不認得的欄位原樣複製到 dst（認得的欄位已由呼叫端驗證過，這裡不碰） */
+function keepUnknown(src,dst,known){
+  if(!isObj(src)||!dst)return dst;
+  Object.keys(src).forEach(k=>{
+    if(known.indexOf(k)>=0||UNSAFE_KEYS.indexOf(k)>=0||Object.prototype.hasOwnProperty.call(dst,k))return;
+    const v=cloneJSON(src[k]);
+    if(v!==undefined)dst[k]=v;
+  });
+  return dst;
+}
+const REC_KNOWN=['id','type','date','updatedAt','deleted','name','time','channel','plans','plan','planNote','deposit',
+  'amount','items','discount','note','category','breakdown','customer','commissionRate','bkTime','bkChannel','fromBooking'];
 function toNum(v){
   if(typeof v==='number')return isFinite(v)?v:null;
   if(typeof v==='string'&&v.trim()!==''){const n=Number(v);return isFinite(n)?n:null;}
@@ -3935,13 +4095,13 @@ function cleanItem(it,needId){
   if(needId)o.id=toStr(it.id,64)||uid();
   if(it.isMonthly===true)o.isMonthly=true;
   if(it.isExtra===true)o.isExtra=true;
-  return o;
+  return keepUnknown(it,o,['name','price','id','isMonthly','isExtra']);
 }
 const cleanItems=(a,needId)=>Array.isArray(a)?a.map(x=>cleanItem(x,needId)).filter(Boolean):[];
 function cleanDiscount(d){
   if(!isObj(d))return null;
   const pct=toNum(d.pct);
-  return {label:toStr(d.label,100),pct:(pct!=null&&pct>0&&pct<=1)?pct:null,fixed:toNum(d.fixed)||0,custom:toNum(d.custom)||0};
+  return keepUnknown(d,{label:toStr(d.label,100),pct:(pct!=null&&pct>0&&pct<=1)?pct:null,fixed:toNum(d.fixed)||0,custom:toNum(d.custom)||0},['label','pct','fixed','custom']);
 }
 function sanitizeRecord(r){
   if(!isObj(r))return null;
@@ -3950,8 +4110,14 @@ function sanitizeRecord(r){
   const updatedAt=toNum(r.updatedAt)||0;
   const deleted=r.deleted===true;
   /* 已刪除的墓碑就算內容壞了也要留著，刪除狀態才能同步到其他裝置 */
-  const tomb=()=>deleted?{id:id,type:'expense',date:'1970-01-01',amount:0,updatedAt:updatedAt,deleted:true}:null;
-  if(!['income','expense','booking'].includes(r.type)||!isDateStr(r.date))return tomb();
+  const tomb=()=>deleted?keepUnknown(r,{id:id,type:'expense',date:'1970-01-01',amount:0,updatedAt:updatedAt,deleted:true},REC_KNOWN):null;
+  /* 不認得的類型（例如新版才有的退款）：只驗證 id／updatedAt／deleted，其餘原樣保留，不進畫面 */
+  if(typeof r.type==='string'&&r.type&&REC_TYPES.indexOf(r.type)<0){
+    const u={id:id,type:toStr(r.type,40),updatedAt:updatedAt};
+    if(deleted)u.deleted=true;
+    return keepUnknown(r,u,['id','type','updatedAt','deleted']);
+  }
+  if(REC_TYPES.indexOf(r.type)<0||!isDateStr(r.date))return tomb();
   const o={id:id,type:r.type,date:r.date,updatedAt:updatedAt};
   if(deleted)o.deleted=true;
   if(r.type==='booking'){
@@ -3963,7 +4129,7 @@ function sanitizeRecord(r){
     o.planNote=toStr(r.planNote,500);
     const dep=toNum(r.deposit);
     o.deposit=(dep!=null&&dep>0)?dep:0;
-    return o;
+    return keepUnknown(r,o,REC_KNOWN);
   }
   const amt=toNum(r.amount);
   if(amt==null)return tomb();
@@ -3973,17 +4139,18 @@ function sanitizeRecord(r){
   o.note=toStr(r.note,1000);
   if(r.type==='expense'){
     o.category=toStr(r.category,50);
-    return o;
+    return keepUnknown(r,o,REC_KNOWN);
   }
   const bd=isObj(r.breakdown)?r.breakdown:null;
-  if(bd)o.breakdown={base:cleanItem(bd.base,false),addons:cleanItems(bd.addons,false),removal:cleanItem(bd.removal,false)};
+  if(bd)o.breakdown=keepUnknown(bd,{base:cleanItem(bd.base,false),addons:cleanItems(bd.addons,false),removal:cleanItem(bd.removal,false)},['base','addons','removal']);
   o.customer=toStr(r.customer,100);
   const cr=toNum(r.commissionRate);
   if(cr!=null)o.commissionRate=clamp01(cr);
   o.bkTime=toTime(r.bkTime);
   o.bkChannel=toStr(r.bkChannel,50);
   o.fromBooking=r.fromBooking===true;
-  return o;
+  if(r.deposit!=null){const dep=toNum(r.deposit);if(dep!=null&&dep>0)o.deposit=dep;}
+  return keepUnknown(r,o,REC_KNOWN);
 }
 const sanitizeRecords=a=>Array.isArray(a)?a.map(sanitizeRecord).filter(Boolean):[];
 /* 自訂配色：每個色碼經過 normHex，不合法就丟掉、改用預設值補上，避免畫面壞掉 */
@@ -4002,11 +4169,11 @@ function cleanThemeSet(c){
       o[k]=normHex(c[k])||D[k];
     }
   });
-  return o;
+  return keepUnknown(c,o,['id','name'].concat(Object.keys(D)));
 }
 function cleanStrMap(m,maxK,maxV){
   const o={};
-  if(isObj(m))Object.keys(m).forEach(k=>{const kk=toStr(k,maxK);if(kk)o[kk]=toStr(m[k],maxV);});
+  if(isObj(m))Object.keys(m).forEach(k=>{const kk=toStr(k,maxK);if(kk&&UNSAFE_KEYS.indexOf(kk)<0)o[kk]=toStr(m[k],maxV);});
   return o;
 }
 function sanitizeOpts(src){
@@ -4016,15 +4183,15 @@ function sanitizeOpts(src){
   if(Array.isArray(src.bookSvc))o.bookSvc=cleanItems(src.bookSvc,true);
   if(isObj(src.expCats)){
     o.expCats={};
-    Object.keys(src.expCats).forEach(k=>{const kk=toStr(k,50);if(kk)o.expCats[kk]=toStrArr(src.expCats[k],50);});
+    Object.keys(src.expCats).forEach(k=>{const kk=toStr(k,50);if(kk&&UNSAFE_KEYS.indexOf(kk)<0)o.expCats[kk]=toStrArr(src.expCats[k],50);});
   }
   if(isObj(src.sched)){
     const sc=src.sched, days={};
     if(isObj(sc.days))Object.keys(sc.days).forEach(ds=>{
       const v=sc.days[ds];
       if(!isDateStr(ds)||!isObj(v))return;
-      if(v.off===true)days[ds]={off:true};
-      else if(Array.isArray(v.slots))days[ds]={slots:v.slots.map(toTime).filter(Boolean)};
+      if(v.off===true)days[ds]=keepUnknown(v,{off:true},['off','slots']);
+      else if(Array.isArray(v.slots))days[ds]=keepUnknown(v,{slots:v.slots.map(toTime).filter(Boolean)},['off','slots']);
     });
     o.sched={slots:Array.isArray(sc.slots)?sc.slots.map(toTime).filter(Boolean):['11:00','15:00','19:00'],days:days};
     if(sc.footer!=null)o.sched.footer=toStr(sc.footer,2000);
@@ -4032,6 +4199,7 @@ function sanitizeOpts(src){
     if(sc.themeSet!=null)o.sched.themeSet=toStr(sc.themeSet,64)||'inherit';
     const pa=toNum(sc.panelAlpha);
     if(pa!=null)o.sched.panelAlpha=clamp01(pa);
+    keepUnknown(sc,o.sched,['slots','days','footer','font','themeSet','panelAlpha']);
   }
   if(isObj(src.look)){
     const lk=src.look;
@@ -4041,10 +4209,11 @@ function sanitizeOpts(src){
     /* 舊版欄位：仍交給 ensureSched 遷移，但先把色碼洗乾淨 */
     ['color','btn','textTitle','textBody'].forEach(k=>{if(lk[k]!=null)o.look[k]=normHex(lk[k])||'';});
     if(lk.font!=null&&FONT_OPTIONS.some(f=>f[0]===lk.font))o.look.font=lk.font;
+    keepUnknown(lk,o.look,['set','cardAlpha','customSets','color','btn','textTitle','textBody','font']);
   }
   if(isObj(src.store)){
     const logo=typeof src.store.logo==='string'&&/^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+\/=]+$/.test(src.store.logo)?src.store.logo:'';
-    o.store={name:toStr(src.store.name,60),logo:logo};
+    o.store=keepUnknown(src.store,{name:toStr(src.store.name,60),logo:logo},['name','logo']);
   }
   if(isObj(src.commission)){
     const c=src.commission;
@@ -4053,18 +4222,20 @@ function sanitizeOpts(src){
     if(lr!=null)o.commission.legacyRate=clamp01(lr);
     const cap=toNum(c.monthlyCap);
     o.commission.monthlyCap=(cap!=null&&cap>=0)?Math.round(cap):null;
+    keepUnknown(c,o.commission,['enabled','rate','legacyRate','monthlyCap']);
   }
   if(src.custNotes!=null)o.custNotes=cleanStrMap(src.custNotes,100,2000);
   if(src.custCommission!=null){
     o.custCommission={};
     if(isObj(src.custCommission))Object.keys(src.custCommission).forEach(k=>{
       const kk=toStr(k,100), v=toNum(src.custCommission[k]);
-      if(kk&&v!=null)o.custCommission[kk]=clamp01(v);
+      if(kk&&v!=null&&UNSAFE_KEYS.indexOf(kk)<0)o.custCommission[kk]=clamp01(v);
     });
   }
   if(src.mig_xiejia===true)o.mig_xiejia=true;
   if(src.mig3===true)o.mig3=true;
-  return o;
+  return keepUnknown(src,o,['updatedAt','base','addon','removal','bookSvc','expCats','sched','look','store',
+    'commission','custNotes','custCommission','mig_xiejia','mig3']);
 }
 function sanitizePayload(r){
   if(!r)return null;
@@ -4076,7 +4247,7 @@ function sanitizePayload(r){
     if(!id)return;
     const x={id:id,name:toStr(b.name,60),updatedAt:toNum(b.updatedAt)||0};
     if(b.deleted===true)x.deleted=true;
-    out.brands.push(x);
+    out.brands.push(keepUnknown(b,x,['id','name','updatedAt','deleted']));
   });
   if(isObj(r.data))Object.keys(r.data).forEach(id=>{
     const d=r.data[id];
@@ -4093,9 +4264,41 @@ function collectAll(){
   });
   return data;
 }
-function applyRemotePayload(raw){
+/* 比較兩份設定內容是否相同（忽略 updatedAt 與欄位順序） */
+function stableStr(v){
+  if(Array.isArray(v))return '['+v.map(stableStr).join(',')+']';
+  if(isObj(v))return '{'+Object.keys(v).filter(k=>k!=='updatedAt').sort().map(k=>JSON.stringify(k)+':'+stableStr(v[k])).join(',')+'}';
+  return JSON.stringify(v===undefined?null:v);
+}
+function applyRemotePayload(raw,opt){
   const r=sanitizePayload(normalizePayload(raw));
   if(!r)return;
+  let restored=0;
+  /* 方案甲：這台裝置第一次對到這個雲端備份時，雲端已有的設定一律為準（不比修改時間） */
+  const preferRemote=!!(opt&&opt.preferRemoteOpts);
+  const optsReplaced=[];
+  /* 匯入「以備份為準（還原已刪除）」：備份裡還在、本機標記刪除的品牌與紀錄，
+     把備份那份的時間改成現在（並比刪除標記新），合併時就會蓋過刪除，同步後其他裝置也會恢復 */
+  if(opt&&opt.restoreDeleted){
+    const now=Date.now();
+    r.brands.forEach(b=>{
+      if(b.deleted)return;
+      const lb=brands.find(x=>x.id===b.id);
+      if(lb&&lb.deleted)b.updatedAt=Math.max(now,(lb.updatedAt||0)+1);
+    });
+    Object.keys(r.data).forEach(id=>{
+      const d=r.data[id];
+      if(!d||!Array.isArray(d.records))return;
+      const local=(id===curBrand)?records:loadJSON(K_REC(id),[]);
+      const byId={};
+      (Array.isArray(local)?local:[]).forEach(x=>{if(x&&x.id)byId[x.id]=x;});
+      d.records.forEach(rec=>{
+        if(rec.deleted)return;
+        const lx=byId[rec.id];
+        if(lx&&lx.deleted){rec.updatedAt=Math.max(now,(lx.updatedAt||0)+1);restored++;}
+      });
+    });
+  }
   brands=purgeBrands(mergeBrands(brands,r.brands||[]));
   const data=r.data||{};
   Object.keys(data).forEach(id=>{
@@ -4104,20 +4307,25 @@ function applyRemotePayload(raw){
     const d=data[id]||{};
     if(id===curBrand){
       records=purgeDeleted(mergeRecords(records,d.records||[]));
-      if(d.opts&&(d.opts.updatedAt||0)>(opts.updatedAt||0)){opts=d.opts;ensureSched();loadThemeObj();applyTheme();}
+      if(d.opts&&(preferRemote||(d.opts.updatedAt||0)>(opts.updatedAt||0))){
+        if(preferRemote&&stableStr(opts)!==stableStr(d.opts))optsReplaced.push((d.opts.store&&d.opts.store.name)||b.name||'');
+        opts=d.opts;ensureSched();loadThemeObj();applyTheme();
+      }
       saveRecords();
       try{localStorage.setItem(K_OPT(),JSON.stringify(opts));}catch(e){}
     }else{
       const merged=purgeDeleted(mergeRecords(loadJSON(K_REC(id),[]),d.records||[]));
       try{localStorage.setItem(K_REC(id),JSON.stringify(merged));}catch(e){}
       const lo=loadJSON(K_OPT(id),null);
-      if(d.opts&&(!lo||(d.opts.updatedAt||0)>(lo.updatedAt||0))){
+      if(d.opts&&(preferRemote||!lo||(d.opts.updatedAt||0)>(lo.updatedAt||0))){
+        if(preferRemote&&lo&&stableStr(lo)!==stableStr(d.opts))optsReplaced.push((d.opts.store&&d.opts.store.name)||b.name||'');
         try{localStorage.setItem(K_OPT(id),JSON.stringify(d.opts));}catch(e){}
       }
     }
   });
   saveBrandsLocal();
   ensureCurBrand();
+  return {restored:restored,optsReplaced:optsReplaced};
 }
 function setSyncUI(state,msg){
   const dot=$('#syncDot');
@@ -4135,8 +4343,11 @@ function refreshSyncStatus(){
 }
 async function syncNow(manual){
   if(!syncCfg.token){if(manual)toast('請先在設定貼上 GitHub 權杖');return;}
-  if(syncing)return;
+  if(syncing){syncPending=true;return;}
+  syncPending=false;
   syncing=true;
+  /* 這台裝置上次「成功對到」的雲端備份；舊版沒有這個欄位，但同步過的就當作已對到目前的 gistId */
+  const prevGist=syncCfg.syncedGist||((syncCfg.last>0)?(syncCfg.gistId||''):'');
   setSyncUI('busy','同步中…');
   try{
     let remote=null;
@@ -4176,8 +4387,15 @@ async function syncNow(manual){
         }
       }else throw new Error('權杖無效（'+ls.status+'）');
     }
-    /* 合併 */
-    if(remote)applyRemotePayload(remote);
+    /* 合併：第一次對到這個雲端備份 → 設定以雲端為準（方案甲）；紀錄照舊逐筆合併 */
+    if(remote){
+      const first=(prevGist!==syncCfg.gistId);
+      const info=applyRemotePayload(remote,{preferRemoteOpts:first})||{optsReplaced:[]};
+      syncCfg.syncedGist=syncCfg.gistId; saveSync();
+      if(first&&info.optsReplaced.length){
+        addNotice('已改用雲端的設定（'+info.optsReplaced.filter(Boolean).join('、')+'）。這是這台裝置第一次同步，同步前在這台改過的設定沒有保留；客人備註、公休日、服務項目等都以雲端為準。');
+      }
+    }
     else{records=purgeDeleted(records);saveRecords();}
     /* [NEW] 上傳前二次確認：若下載之後雲端又被別台裝置更新過，
        先把對方的資料拉下來合併，避免整包覆蓋掉對方剛記的紀錄 */
@@ -4196,7 +4414,11 @@ async function syncNow(manual){
       }
     }
     /* 上傳 */
-    const payload=JSON.stringify({brands:brands,data:collectAll(),syncedAt:new Date().toISOString()},null,1);
+    /* 上傳內容是在這一刻同步打包的；「上次同步」記成打包當下的時間，
+       打包之後（等待上傳時）才改的紀錄 updatedAt 一定 >= 這個時間，會被當成「還沒同步」 */
+    const packedAt=Date.now();
+    /* 不縮排，減少上傳流量 */
+    const payload=JSON.stringify({brands:brands,data:collectAll(),syncedAt:new Date().toISOString()});
     if(!syncCfg.gistId){
       const res=await gh('POST','/gists',{
         description:'PuliPuli.Studio 記帳資料（自動同步，請勿手動修改）',
@@ -4210,7 +4432,7 @@ async function syncNow(manual){
       const res=await gh('PATCH','/gists/'+syncCfg.gistId,{files:{[GIST_FILE]:{content:payload}}});
       if(!res.ok)throw new Error('上傳失敗 '+res.status);
     }
-    syncCfg.last=Date.now(); saveSync();
+    syncCfg.last=packedAt; syncCfg.syncedGist=syncCfg.gistId; saveSync();
     setSyncUI('ok','上次同步：'+new Date(syncCfg.last).toLocaleString('zh-TW',{hour12:false}));
     if(manual)toast('同步完成 ☁️');
     if(curPage==='cal')renderCal();
@@ -4221,8 +4443,35 @@ async function syncNow(manual){
     if(manual)toast('同步失敗，請檢查網路與權杖');
   }finally{
     syncing=false;
+    if(syncPending){
+      syncPending=false;
+      clearTimeout(syncTimer);
+      syncTimer=setTimeout(()=>syncNow(false),500);
+    }
   }
 }
+
+/* ========= 多分頁同步：另一個分頁改了資料，這個分頁重新載入、重畫 ========= */
+window.addEventListener('storage',e=>{
+  if(!e.key||e.storageArea!==localStorage)return;
+  if(e.key===K_REC()){
+    /* 只合併進記憶體、不寫回，避免兩個分頁來回觸發 */
+    const other=loadJSON(K_REC(),[]);
+    if(Array.isArray(other))records=purgeDeleted(mergeRecords(records,other));
+  }else if(e.key===K_OPT()){
+    const o=loadJSON(K_OPT(),null);
+    if(!o)return;
+    opts=o; ensureSched(); loadThemeObj(); applyTheme();
+  }else if(e.key===LS_BRANDS){
+    const b=loadJSON(LS_BRANDS,null);
+    if(!Array.isArray(b))return;
+    brands=b; ensureCurBrand(); applyTheme();
+  }else if(e.key===LS_SYNC){
+    syncCfg=loadJSON(LS_SYNC,syncCfg);
+    return;
+  }else return;
+  go(curPage);
+});
 
 /* ========= 啟動 ========= */
 applyTheme();
