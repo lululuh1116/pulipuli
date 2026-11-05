@@ -1261,14 +1261,35 @@ $('#brandBtn').onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault()
 $('#brandMask').onclick=closeBrandSheet;
 
 /* ========= 月曆 ========= */
-const today=new Date(); today.setHours(0,0,0,0);
+let today=new Date(); today.setHours(0,0,0,0);
 let calY=today.getFullYear(), calM=today.getMonth();
 let selDate=fmtD(today);
+/* App 開著跨過午夜時 today 會停在昨天：每次重畫都重算。
+   若跨日了，原本停在「舊的今天」的選取（月曆選日、總紀錄週次、報表日期）一起帶到新的今天 */
+function refreshToday(){
+  const t=new Date(); t.setHours(0,0,0,0);
+  if(t.getTime()===today.getTime())return false;
+  const old=today, oldDs=fmtD(old);
+  today=t;
+  if(selDate===oldDs){
+    selDate=fmtD(t);
+    if(calY===old.getFullYear()&&calM===old.getMonth()){calY=t.getFullYear();calM=t.getMonth();}
+  }
+  if(selWeek===weekStart(old).getTime())selWeek=weekStart(t).getTime();
+  if(fmtD(repDate)===oldDs)repDate=new Date();
+  return true;
+}
+/* 從背景切回來時重算今天並重畫目前頁面 */
+document.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState==='hidden')return;
+  if(refreshToday())go(curPage);
+});
 
 $('#calPrev').onclick=()=>{calM--;if(calM<0){calM=11;calY--;}renderCal();};
 $('#calNext').onclick=()=>{calM++;if(calM>11){calM=0;calY++;}renderCal();};
 
 function renderCal(){
+  refreshToday();
   $('#calTitle').textContent=calY+'年 '+(calM+1)+'月';
   const grid=$('#calGrid'); grid.innerHTML='';
   const first=new Date(calY,calM,1);
@@ -1459,6 +1480,7 @@ function weekStart(d){const x=new Date(d);x.setHours(0,0,0,0);x.setDate(x.getDat
 let selWeek=weekStart(today).getTime();
 
 function renderRec(){
+  refreshToday();
   const pills=$('#weekPills'); pills.innerHTML='';
   const cur=weekStart(today).getTime();
   let min=cur;
@@ -1670,6 +1692,7 @@ function financePieData(inSum,commission,exSum,withComm){
     :[{label:'收入',value:inSum,color:S.pieIn},{label:'支出',value:exSum,color:S.pieEx}];
 }
 function renderRep(){
+  refreshToday();
   const per=periodFilter();
   $('#repPerLabel').textContent=per.label;
   const isCur=(repPer==='day'&&fmtD(repDate)===fmtD(today))||
