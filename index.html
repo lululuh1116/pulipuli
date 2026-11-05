@@ -260,6 +260,20 @@ main{padding:14px 16px 120px;max-width:560px;margin:0 auto}
   font-size:12px;font-weight:700;white-space:nowrap;box-shadow:var(--shadow-sm);
 }
 .sheet-date{text-align:center;font-size:12.5px;color:var(--brown-soft);margin-top:8px}
+/* 記帳日期膠囊：上面蓋一個透明的 input type=date，手機點下去直接跳原生日期選擇器 */
+.date-pill{
+  position:relative;display:inline-flex;align-items:center;gap:6px;max-width:100%;
+  padding:6px 14px;border-radius:999px;background:var(--milk);box-shadow:var(--shadow-sm);
+  font-size:12.5px;font-weight:600;color:var(--brown-2);cursor:pointer;
+}
+.date-pill .date-orig{font-size:11px;font-weight:400;color:var(--brown-soft)}
+.date-pill .date-orig:empty{display:none}
+.date-pill .caret{font-size:11px;color:var(--brown-soft)}
+.date-pill input[type=date]{
+  position:absolute;inset:0;width:100%;height:100%;margin:0;padding:0;border:0;
+  opacity:0;cursor:pointer;font-size:16px;-webkit-appearance:none;appearance:none;background:transparent;
+}
+.date-pill:focus-within{box-shadow:0 0 0 2px var(--accent)}
 
 .blk{margin-top:14px}
 .blk .blk-t{font-size:13px;font-weight:700;color:var(--brown-2);margin-bottom:8px}
@@ -493,7 +507,12 @@ main{padding:14px 16px 120px;max-width:560px;margin:0 auto}
       <button id="segIn" class="on in">收入</button>
       <button id="segEx">支出</button>
     </div>
-    <div class="sheet-date" id="entryDate"></div>
+    <div class="sheet-date">
+      <div class="date-pill" id="entryDatePill">
+        <span id="entryDate"></span><span class="date-orig" id="entryDateOrig"></span><span class="caret" aria-hidden="true">▾</span>
+        <input type="date" id="entryDateInput" aria-label="修改日期">
+      </div>
+    </div>
   </div>
   <div class="sheet-body" id="entryBody"></div>
   <div class="sheet-foot">
@@ -1827,7 +1846,9 @@ let inSel={base:null,addons:[],extra:'',extraName:'',removal:null,freeRemoval:fa
 let exSel={cat:Object.keys(opts.expCats)[0],items:[],other:'',note:''};
 let calcExpr='';
 let editingId=null;   /* 正在編輯的紀錄 id；null 表示新增 */
-let editDate=null;    /* 本次表單對應的日期（編輯時沿用原紀錄日期） */
+let editDate=null;    /* 本次表單對應的日期（編輯時預設沿用原紀錄日期，可在頂部膠囊改） */
+let origDate=null;    /* 打開表單時的原始日期，用來顯示「原 11/5」 */
+let entryDateLabel='';/* 日期前面的說明文字（記帳日期／編輯紀錄／某某結帳） */
 const BK_CHANNELS=['LINE','IG','Threads','FB','電話'];
 let bkSel={name:'',time:'',channel:'',channelOther:'',plans:[],planNote:'',deposit:''};
 
@@ -1890,8 +1911,9 @@ function openEntry(rec){
     resetForms();
     inSel.commissionRate=String(Math.round(newIncomeCommissionRate('')*1000)/10);
   }
-  const d=new Date(editDate+'T00:00:00');
-  $('#entryDate').textContent=(editingId?'✏️ 編輯紀錄：':'記帳日期：')+d.getFullYear()+'/'+(d.getMonth()+1)+'/'+d.getDate()+'（'+WD[d.getDay()]+'）';
+  origDate=editDate;
+  entryDateLabel=editingId?'✏️ 編輯紀錄：':'記帳日期：';
+  renderEntryDate();
   renderSeg(); renderEntryBody();
   $('#entryMask').classList.add('show'); $('#entrySheet').classList.add('show');
 }
@@ -1925,11 +1947,34 @@ function openCheckout(bk){
   if(bk.deposit>0)parts.push('訂金已付$'+bk.deposit);
   if(bk.planNote)parts.push(bk.planNote);
   inSel.note=parts.join('・');
-  const d=new Date(bk.date+'T00:00:00');
-  $('#entryDate').textContent='💰 '+bk.name+' 結帳：'+(d.getMonth()+1)+'/'+d.getDate()+'（'+WD[d.getDay()]+'）';
+  origDate=editDate;
+  entryDateLabel='💰 '+bk.name+' 結帳：';
+  renderEntryDate();
   renderSeg(); renderEntryBody();
   $('#entryMask').classList.add('show'); $('#entrySheet').classList.add('show');
 }
+
+/* 表單頂部日期膠囊：顯示目前日期；改過的話後面加小字「原 11/5」 */
+const mdLabel=ds=>{const d=new Date(ds+'T00:00:00');return (d.getMonth()+1)+'/'+d.getDate();};
+function renderEntryDate(){
+  const d=new Date(editDate+'T00:00:00');
+  $('#entryDate').textContent=entryDateLabel+d.getFullYear()+'/'+(d.getMonth()+1)+'/'+d.getDate()+'（'+WD[d.getDay()]+'）';
+  $('#entryDateOrig').textContent=(origDate&&editDate!==origDate)?'原 '+mdLabel(origDate):'';
+  $('#entryDateInput').value=editDate;
+}
+/* 電腦用滑鼠點時，原生 date 欄位不會自己跳出月曆，主動呼叫 showPicker */
+$('#entryDateInput').addEventListener('click',e=>{
+  const mouse=(e.pointerType==='mouse')||(!e.pointerType&&window.matchMedia&&matchMedia('(pointer:fine)').matches);
+  if(!mouse)return;
+  try{e.target.showPicker();}catch(err){}
+});
+$('#entryDateInput').addEventListener('change',e=>{
+  const v=e.target.value;
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(v)){e.target.value=editDate;return;}   /* 清空或格式不對 → 還原 */
+  editDate=v;
+  renderEntryDate();
+  if(entryMode==='booking'&&v!==origDate&&isOffDay(v))toast('💤 '+mdLabel(v)+' 是公休日，仍可預約，按 OK 時會再確認');
+});
 
 /* 把既有預約還原成表單狀態 */
 function prefillBooking(r){
@@ -2545,6 +2590,10 @@ $('#okBtn').onclick=()=>{
   }
   if(entryMode==='booking'){
     if(!bkSel.name.trim())return;
+    /* 改到公休日：不硬擋，但再確認一次 */
+    if(editDate!==origDate&&isOffDay(editDate)){
+      if(!confirm('💤 '+mdLabel(editDate)+' 是公休日，仍要把預約排在這天嗎？'))return;
+    }
     /* 撞單提醒：同一天且時間相距 90 分鐘內 */
     if(bkSel.time){
       const toMin=t=>{const m=/^(\d{1,2}):(\d{2})$/.exec(t);return m?(+m[1])*60+(+m[2]):null;};
@@ -2575,7 +2624,14 @@ $('#okBtn').onclick=()=>{
     });
     toast(wasEditing?'已更新預約':'已新增預約：'+bkSel.name.trim());
   }
+  /* 存完讓月曆（與總紀錄的週次）跳到這筆的日期 */
+  const savedDate=editDate;
   closeEntry();
+  if(savedDate&&savedDate!==origDate){
+    const sd=new Date(savedDate+'T00:00:00');
+    selDate=savedDate; calY=sd.getFullYear(); calM=sd.getMonth();
+    selWeek=weekStart(sd).getTime();
+  }
   if(wasEditing)go(curPage); else go('cal');
 };
 
