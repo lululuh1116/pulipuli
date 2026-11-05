@@ -4324,7 +4324,8 @@ async function syncNow(manual){
       }
     }
     /* 上傳 */
-    const payload=JSON.stringify({brands:brands,data:collectAll(),syncedAt:new Date().toISOString()},null,1);
+    /* 不縮排，減少上傳流量 */
+    const payload=JSON.stringify({brands:brands,data:collectAll(),syncedAt:new Date().toISOString()});
     if(!syncCfg.gistId){
       const res=await gh('POST','/gists',{
         description:'PuliPuli.Studio 記帳資料（自動同步，請勿手動修改）',
