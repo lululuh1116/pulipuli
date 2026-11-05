@@ -1014,7 +1014,7 @@ function openBrandSheet(){
       const tag=document.createElement('span'); tag.className='tag'; tag.textContent='使用中 ✓';
       row.appendChild(tag);
     }else{
-      const cnt=loadJSON(K_REC(b.id),[]).filter(r=>r&&!r.deleted).length;
+      const cnt=loadJSON(K_REC(b.id),[]).filter(r=>r&&!r.deleted&&REC_TYPES.indexOf(r.type)>=0).length;
       const tag=document.createElement('span'); tag.className='tag'; tag.textContent=cnt+' 筆';
       row.appendChild(tag);
       const rm=document.createElement('button'); rm.className='rm'; rm.textContent='刪除';
@@ -1088,7 +1088,9 @@ function saveOpts(){
   catch(e){markSave('opt',false);return false;}
 }
 function saveSync(){localStorage.setItem(LS_SYNC,JSON.stringify(syncCfg))}
-const live=()=>records.filter(r=>!r.deleted);
+/* 畫面、報表、統計只看認得的紀錄類型；別台新版才有的類型原樣保留在資料裡，但絕不畫到畫面上 */
+const REC_TYPES=['income','expense','booking'];
+const live=()=>records.filter(r=>!r.deleted&&REC_TYPES.indexOf(r.type)>=0);
 /* 這筆紀錄是否已在別處被刪除：記憶體（含同步、其他分頁合併進來的）或本機儲存裡較新的版本已標記刪除 */
 function deletedElsewhere(id){
   const m=records.find(x=>x.id===id);
@@ -4106,7 +4108,13 @@ function sanitizeRecord(r){
   const deleted=r.deleted===true;
   /* 已刪除的墓碑就算內容壞了也要留著，刪除狀態才能同步到其他裝置 */
   const tomb=()=>deleted?keepUnknown(r,{id:id,type:'expense',date:'1970-01-01',amount:0,updatedAt:updatedAt,deleted:true},REC_KNOWN):null;
-  if(!['income','expense','booking'].includes(r.type)||!isDateStr(r.date))return tomb();
+  /* 不認得的類型（例如新版才有的退款）：只驗證 id／updatedAt／deleted，其餘原樣保留，不進畫面 */
+  if(typeof r.type==='string'&&r.type&&REC_TYPES.indexOf(r.type)<0){
+    const u={id:id,type:toStr(r.type,40),updatedAt:updatedAt};
+    if(deleted)u.deleted=true;
+    return keepUnknown(r,u,['id','type','updatedAt','deleted']);
+  }
+  if(REC_TYPES.indexOf(r.type)<0||!isDateStr(r.date))return tomb();
   const o={id:id,type:r.type,date:r.date,updatedAt:updatedAt};
   if(deleted)o.deleted=true;
   if(r.type==='booking'){
