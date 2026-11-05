@@ -1632,6 +1632,11 @@ function customerCommissionRate(name){
   }
   return c.rate;
 }
+/* 客人備註：只讀物件自己的欄位，避免名稱是 constructor 時讀到內建函式 */
+function custNote(name){
+  const m=opts.custNotes;
+  return (m&&Object.prototype.hasOwnProperty.call(m,name)&&typeof m[name]==='string')?m[name]:'';
+}
 function newIncomeCommissionRate(customer){return customerCommissionRate(customer);}
 /* 已存收入優先讀取該筆快照；舊版沒有 commissionRate 的收入固定用 legacyRate，不跟著未來預設率變動 */
 function recordCommissionRate(r){
@@ -1842,7 +1847,7 @@ function renderRep(){
       :'');
 
   /* 服務佔比 */
-  const svcMap={};
+  const svcMap=Object.create(null);   /* 沒有原型：客人／服務名稱是 __proto__、constructor 也不會出事 */
   rs.forEach(r=>{
     if(r.type!=='income')return;
     const name=r.breakdown&&r.breakdown.base?r.breakdown.base.name:'其他';
@@ -1876,7 +1881,7 @@ function renderRep(){
   $('#repBars').innerHTML='<svg width="100%" viewBox="0 0 '+W+' '+H+'" role="img">'+bars+'</svg>';
 
   /* 常客排行（全期間累積） */
-  const vipMap={};
+  const vipMap=Object.create(null);
   live().forEach(r=>{
     if(r.type!=='income')return;
     let name=r.customer||'';
@@ -1893,7 +1898,7 @@ function renderRep(){
     ? vips.map((v,i)=>
         '<div data-cust="'+esc(v.name)+'" style="display:flex;align-items:center;gap:10px;padding:8px 2px;border-bottom:1px solid var(--line);font-size:14px;cursor:pointer">'+
         '<span style="width:26px;text-align:center">'+(medals[i]||(i+1))+'</span>'+
-        '<span style="flex:1;font-weight:700">'+esc(v.name)+((opts.custNotes&&opts.custNotes[v.name])?' 📝':'')+'</span>'+
+        '<span style="flex:1;font-weight:700">'+esc(v.name)+(custNote(v.name)?' 📝':'')+'</span>'+
         '<span style="color:var(--brown-soft);font-size:12px">'+v.n+' 次</span>'+
         '<span style="font-weight:700;color:var(--accent-deep)">'+money(v.sum)+'</span>'+
         '</div>').join('')+
@@ -1917,7 +1922,7 @@ function openCustomer(name){
   const ta=document.createElement('textarea');
   ta.className='inline-input wide'; ta.rows=3;
   ta.style.cssText='width:100%;resize:vertical;line-height:1.6';
-  ta.value=(opts.custNotes&&opts.custNotes[name])||'';
+  ta.value=custNote(name);
   ta.onchange=()=>{
     if(!opts.custNotes)opts.custNotes={};
     if(ta.value.trim())opts.custNotes[name]=ta.value.trim();
@@ -3126,7 +3131,7 @@ async function exportReport(){
   const finalNet=netRevenue-exSum;
   const visits=rs.filter(r=>r.type==='income').length;
   const avg=visits?Math.round(inSum/visits):0;
-  const svcMap={};
+  const svcMap=Object.create(null);   /* 沒有原型：客人／服務名稱是 __proto__、constructor 也不會出事 */
   rs.forEach(r=>{
     if(r.type!=='income')return;
     const name=r.breakdown&&r.breakdown.base?r.breakdown.base.name:'其他';
@@ -3143,7 +3148,7 @@ async function exportReport(){
     if(r.date.slice(0,4)!=String(yNow))return;
     counts[parseInt(r.date.slice(5,7),10)-1]++;
   });
-  const vipMap={};
+  const vipMap=Object.create(null);
   live().forEach(r=>{
     if(r.type!=='income')return;
     let name=r.customer||'';
@@ -4136,7 +4141,7 @@ function cleanThemeSet(c){
 }
 function cleanStrMap(m,maxK,maxV){
   const o={};
-  if(isObj(m))Object.keys(m).forEach(k=>{const kk=toStr(k,maxK);if(kk)o[kk]=toStr(m[k],maxV);});
+  if(isObj(m))Object.keys(m).forEach(k=>{const kk=toStr(k,maxK);if(kk&&UNSAFE_KEYS.indexOf(kk)<0)o[kk]=toStr(m[k],maxV);});
   return o;
 }
 function sanitizeOpts(src){
@@ -4146,7 +4151,7 @@ function sanitizeOpts(src){
   if(Array.isArray(src.bookSvc))o.bookSvc=cleanItems(src.bookSvc,true);
   if(isObj(src.expCats)){
     o.expCats={};
-    Object.keys(src.expCats).forEach(k=>{const kk=toStr(k,50);if(kk)o.expCats[kk]=toStrArr(src.expCats[k],50);});
+    Object.keys(src.expCats).forEach(k=>{const kk=toStr(k,50);if(kk&&UNSAFE_KEYS.indexOf(kk)<0)o.expCats[kk]=toStrArr(src.expCats[k],50);});
   }
   if(isObj(src.sched)){
     const sc=src.sched, days={};
@@ -4192,7 +4197,7 @@ function sanitizeOpts(src){
     o.custCommission={};
     if(isObj(src.custCommission))Object.keys(src.custCommission).forEach(k=>{
       const kk=toStr(k,100), v=toNum(src.custCommission[k]);
-      if(kk&&v!=null)o.custCommission[kk]=clamp01(v);
+      if(kk&&v!=null&&UNSAFE_KEYS.indexOf(kk)<0)o.custCommission[kk]=clamp01(v);
     });
   }
   if(src.mig_xiejia===true)o.mig_xiejia=true;
