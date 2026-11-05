@@ -4021,11 +4021,27 @@ function normalizePayload(r){
   }
   return null;
 }
-/* ===== 外部資料（匯入 JSON／雲端）白名單驗證 =====
-   只留認得的欄位；金額、價格一律轉成 Number，轉不了就丟掉；色碼一律經過 normHex。
-   目的：別人的備份檔或被竄改的雲端資料，不能把程式碼塞進 innerHTML。
+/* ===== 外部資料（匯入 JSON／雲端）驗證 =====
+   認得的欄位一律驗證型別：金額、價格轉成 Number，轉不了就丟掉；色碼一律經過 normHex。
+   不認得的欄位（例如別台裝置先升級新增的欄位）原樣保留、跟著存檔與同步，
+   但程式只讀認得的欄位，所以這些欄位絕不會被拼進畫面（innerHTML）。
+   目的：別人的備份檔或被竄改的雲端資料，不能把程式碼塞進畫面；新版欄位也不會在舊版裝置被丟掉。
    只清洗「內容」，設定（opts）的合併方式（updatedAt 較新者整份勝出）完全不變。 */
 const isObj=v=>!!v&&typeof v==='object'&&!Array.isArray(v);
+const UNSAFE_KEYS=['__proto__','constructor','prototype'];
+const cloneJSON=v=>{try{return JSON.parse(JSON.stringify(v));}catch(e){return undefined;}};
+/* 把 src 裡不認得的欄位原樣複製到 dst（認得的欄位已由呼叫端驗證過，這裡不碰） */
+function keepUnknown(src,dst,known){
+  if(!isObj(src)||!dst)return dst;
+  Object.keys(src).forEach(k=>{
+    if(known.indexOf(k)>=0||UNSAFE_KEYS.indexOf(k)>=0||Object.prototype.hasOwnProperty.call(dst,k))return;
+    const v=cloneJSON(src[k]);
+    if(v!==undefined)dst[k]=v;
+  });
+  return dst;
+}
+const REC_KNOWN=['id','type','date','updatedAt','deleted','name','time','channel','plans','plan','planNote','deposit',
+  'amount','items','discount','note','category','breakdown','customer','commissionRate','bkTime','bkChannel','fromBooking'];
 function toNum(v){
   if(typeof v==='number')return isFinite(v)?v:null;
   if(typeof v==='string'&&v.trim()!==''){const n=Number(v);return isFinite(n)?n:null;}
@@ -4048,13 +4064,13 @@ function cleanItem(it,needId){
   if(needId)o.id=toStr(it.id,64)||uid();
   if(it.isMonthly===true)o.isMonthly=true;
   if(it.isExtra===true)o.isExtra=true;
-  return o;
+  return keepUnknown(it,o,['name','price','id','isMonthly','isExtra']);
 }
 const cleanItems=(a,needId)=>Array.isArray(a)?a.map(x=>cleanItem(x,needId)).filter(Boolean):[];
 function cleanDiscount(d){
   if(!isObj(d))return null;
   const pct=toNum(d.pct);
-  return {label:toStr(d.label,100),pct:(pct!=null&&pct>0&&pct<=1)?pct:null,fixed:toNum(d.fixed)||0,custom:toNum(d.custom)||0};
+  return keepUnknown(d,{label:toStr(d.label,100),pct:(pct!=null&&pct>0&&pct<=1)?pct:null,fixed:toNum(d.fixed)||0,custom:toNum(d.custom)||0},['label','pct','fixed','custom']);
 }
 function sanitizeRecord(r){
   if(!isObj(r))return null;
@@ -4063,7 +4079,7 @@ function sanitizeRecord(r){
   const updatedAt=toNum(r.updatedAt)||0;
   const deleted=r.deleted===true;
   /* 已刪除的墓碑就算內容壞了也要留著，刪除狀態才能同步到其他裝置 */
-  const tomb=()=>deleted?{id:id,type:'expense',date:'1970-01-01',amount:0,updatedAt:updatedAt,deleted:true}:null;
+  const tomb=()=>deleted?keepUnknown(r,{id:id,type:'expense',date:'1970-01-01',amount:0,updatedAt:updatedAt,deleted:true},REC_KNOWN):null;
   if(!['income','expense','booking'].includes(r.type)||!isDateStr(r.date))return tomb();
   const o={id:id,type:r.type,date:r.date,updatedAt:updatedAt};
   if(deleted)o.deleted=true;
@@ -4076,7 +4092,7 @@ function sanitizeRecord(r){
     o.planNote=toStr(r.planNote,500);
     const dep=toNum(r.deposit);
     o.deposit=(dep!=null&&dep>0)?dep:0;
-    return o;
+    return keepUnknown(r,o,REC_KNOWN);
   }
   const amt=toNum(r.amount);
   if(amt==null)return tomb();
@@ -4086,10 +4102,10 @@ function sanitizeRecord(r){
   o.note=toStr(r.note,1000);
   if(r.type==='expense'){
     o.category=toStr(r.category,50);
-    return o;
+    return keepUnknown(r,o,REC_KNOWN);
   }
   const bd=isObj(r.breakdown)?r.breakdown:null;
-  if(bd)o.breakdown={base:cleanItem(bd.base,false),addons:cleanItems(bd.addons,false),removal:cleanItem(bd.removal,false)};
+  if(bd)o.breakdown=keepUnknown(bd,{base:cleanItem(bd.base,false),addons:cleanItems(bd.addons,false),removal:cleanItem(bd.removal,false)},['base','addons','removal']);
   o.customer=toStr(r.customer,100);
   const cr=toNum(r.commissionRate);
   if(cr!=null)o.commissionRate=clamp01(cr);
@@ -4097,7 +4113,7 @@ function sanitizeRecord(r){
   o.bkChannel=toStr(r.bkChannel,50);
   o.fromBooking=r.fromBooking===true;
   if(r.deposit!=null){const dep=toNum(r.deposit);if(dep!=null&&dep>0)o.deposit=dep;}
-  return o;
+  return keepUnknown(r,o,REC_KNOWN);
 }
 const sanitizeRecords=a=>Array.isArray(a)?a.map(sanitizeRecord).filter(Boolean):[];
 /* 自訂配色：每個色碼經過 normHex，不合法就丟掉、改用預設值補上，避免畫面壞掉 */
@@ -4116,7 +4132,7 @@ function cleanThemeSet(c){
       o[k]=normHex(c[k])||D[k];
     }
   });
-  return o;
+  return keepUnknown(c,o,['id','name'].concat(Object.keys(D)));
 }
 function cleanStrMap(m,maxK,maxV){
   const o={};
@@ -4137,8 +4153,8 @@ function sanitizeOpts(src){
     if(isObj(sc.days))Object.keys(sc.days).forEach(ds=>{
       const v=sc.days[ds];
       if(!isDateStr(ds)||!isObj(v))return;
-      if(v.off===true)days[ds]={off:true};
-      else if(Array.isArray(v.slots))days[ds]={slots:v.slots.map(toTime).filter(Boolean)};
+      if(v.off===true)days[ds]=keepUnknown(v,{off:true},['off','slots']);
+      else if(Array.isArray(v.slots))days[ds]=keepUnknown(v,{slots:v.slots.map(toTime).filter(Boolean)},['off','slots']);
     });
     o.sched={slots:Array.isArray(sc.slots)?sc.slots.map(toTime).filter(Boolean):['11:00','15:00','19:00'],days:days};
     if(sc.footer!=null)o.sched.footer=toStr(sc.footer,2000);
@@ -4146,6 +4162,7 @@ function sanitizeOpts(src){
     if(sc.themeSet!=null)o.sched.themeSet=toStr(sc.themeSet,64)||'inherit';
     const pa=toNum(sc.panelAlpha);
     if(pa!=null)o.sched.panelAlpha=clamp01(pa);
+    keepUnknown(sc,o.sched,['slots','days','footer','font','themeSet','panelAlpha']);
   }
   if(isObj(src.look)){
     const lk=src.look;
@@ -4155,10 +4172,11 @@ function sanitizeOpts(src){
     /* 舊版欄位：仍交給 ensureSched 遷移，但先把色碼洗乾淨 */
     ['color','btn','textTitle','textBody'].forEach(k=>{if(lk[k]!=null)o.look[k]=normHex(lk[k])||'';});
     if(lk.font!=null&&FONT_OPTIONS.some(f=>f[0]===lk.font))o.look.font=lk.font;
+    keepUnknown(lk,o.look,['set','cardAlpha','customSets','color','btn','textTitle','textBody','font']);
   }
   if(isObj(src.store)){
     const logo=typeof src.store.logo==='string'&&/^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+\/=]+$/.test(src.store.logo)?src.store.logo:'';
-    o.store={name:toStr(src.store.name,60),logo:logo};
+    o.store=keepUnknown(src.store,{name:toStr(src.store.name,60),logo:logo},['name','logo']);
   }
   if(isObj(src.commission)){
     const c=src.commission;
@@ -4167,6 +4185,7 @@ function sanitizeOpts(src){
     if(lr!=null)o.commission.legacyRate=clamp01(lr);
     const cap=toNum(c.monthlyCap);
     o.commission.monthlyCap=(cap!=null&&cap>=0)?Math.round(cap):null;
+    keepUnknown(c,o.commission,['enabled','rate','legacyRate','monthlyCap']);
   }
   if(src.custNotes!=null)o.custNotes=cleanStrMap(src.custNotes,100,2000);
   if(src.custCommission!=null){
@@ -4178,7 +4197,8 @@ function sanitizeOpts(src){
   }
   if(src.mig_xiejia===true)o.mig_xiejia=true;
   if(src.mig3===true)o.mig3=true;
-  return o;
+  return keepUnknown(src,o,['updatedAt','base','addon','removal','bookSvc','expCats','sched','look','store',
+    'commission','custNotes','custCommission','mig_xiejia','mig3']);
 }
 function sanitizePayload(r){
   if(!r)return null;
@@ -4190,7 +4210,7 @@ function sanitizePayload(r){
     if(!id)return;
     const x={id:id,name:toStr(b.name,60),updatedAt:toNum(b.updatedAt)||0};
     if(b.deleted===true)x.deleted=true;
-    out.brands.push(x);
+    out.brands.push(keepUnknown(b,x,['id','name','updatedAt','deleted']));
   });
   if(isObj(r.data))Object.keys(r.data).forEach(id=>{
     const d=r.data[id];
