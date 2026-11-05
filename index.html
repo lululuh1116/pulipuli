@@ -388,6 +388,20 @@ main{padding:14px 16px 120px;max-width:560px;margin:0 auto}
   box-shadow:var(--shadow-sm);
 }
 #saveErrBanner.show{display:block}
+/* 常駐通知（例如品牌在其他裝置被刪除），按「知道了」才收起 */
+#noticeBanner{
+  display:none;margin:0 0 8px;padding:10px 14px;border-radius:12px;
+  background:var(--bk-bg,#F7F0DC);border:1px solid var(--bk-line,#E7DAB5);color:var(--ink-body,#2B2356);
+  font-size:13px;line-height:1.55;box-shadow:var(--shadow-sm);
+}
+#noticeBanner.show{display:block}
+#noticeBanner .nb-row{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;padding:2px 0}
+#noticeBanner .nb-row span{flex:1 1 200px}
+#noticeBanner .nb-btn,#noticeBanner .nb-close{
+  min-height:36px;padding:6px 12px;border-radius:999px;font-size:12.5px;font-weight:700;
+  background:var(--card,#fff);color:var(--brown-2,#3A3E6C);box-shadow:var(--shadow-sm);
+}
+#noticeBanner .nb-close{display:block;margin:6px 0 0 auto}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
 </head>
@@ -396,6 +410,7 @@ main{padding:14px 16px 120px;max-width:560px;margin:0 auto}
 
 <header class="app">
   <div id="saveErrBanner" role="alert"></div>
+  <div id="noticeBanner" role="status"></div>
   <div class="brand-row">
     <div class="brand" id="brandBtn" role="button" tabindex="0" aria-label="切換品牌"><span id="brandLogo"></span><span class="brand-text"><h1 id="brandName">PuliPuli.Studio</h1><span class="sub" id="brandSub">美甲記帳</span></span><span class="brand-caret">▾</span></div>
     <div class="head-actions">
@@ -868,7 +883,7 @@ function deleteBrand(id){
   if(aliveBrands().length<=1){toast('至少要保留一個品牌');return;}
   const b=brands.find(x=>x.id===id); if(!b)return;
   const nm=brandName(id);
-  if(!confirm('刪除品牌「'+nm+'」？\n這個品牌的所有紀錄與設定都會刪除，其他裝置同步後也會一起刪除。'))return;
+  if(!confirm('刪除品牌「'+nm+'」？\n這個品牌的所有紀錄與設定都會刪除，其他裝置同步後也會一起刪除，其他手機尚未同步的紀錄也會消失。'))return;
   if(!confirm('再確認一次：「'+nm+'」的資料無法復原。'))return;
   b.deleted=true; b.updatedAt=Date.now();
   [K_REC(id),K_OPT(id),K_THEME(id),K_SCHEDBG(id)].forEach(k=>localStorage.removeItem(k));
@@ -884,11 +899,70 @@ function mergeBrands(a,b){
     if(!old||(x.updatedAt||0)>(old.updatedAt||0))map[x.id]=Object.assign({},x);
   });
   const arr=Object.values(map);
-  /* 在別台裝置被刪掉的品牌，本機資料一併清掉 */
+  /* 在別台裝置被刪掉的品牌，本機資料一併清掉；清之前若有還沒同步的紀錄，先下載備份 */
   arr.forEach(x=>{
-    if(x.deleted)[K_REC(x.id),K_OPT(x.id),K_THEME(x.id),K_SCHEDBG(x.id)].forEach(k=>localStorage.removeItem(k));
+    if(!x.deleted)return;
+    rescueDeletedBrand(x);
+    [K_REC(x.id),K_OPT(x.id),K_THEME(x.id),K_SCHEDBG(x.id)].forEach(k=>localStorage.removeItem(k));
   });
   return arr;
+}
+/* 下載文字檔（JSON 備份用） */
+function downloadText(text,filename){
+  const blob=new Blob([text],{type:'application/json'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download=filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href),60000);
+}
+/* 品牌在別台裝置被刪：本機若有「上次同步之後」才新增或修改的紀錄，先整包匯出成 JSON 下載，
+   之後可用「匯入 JSON」救回（匯出的品牌時間設成現在，匯入時會蓋過刪除標記） */
+function rescueDeletedBrand(x){
+  const isCur=(x.id===curBrand);
+  const recs=isCur?records:loadJSON(K_REC(x.id),null);
+  if(!Array.isArray(recs))return;          /* 本機沒有這個品牌的資料（例如就是在這台刪的） */
+  const last=(syncCfg&&syncCfg.last)||0;
+  const unsynced=recs.filter(r=>r&&!r.deleted&&(r.updatedAt||0)>last);
+  if(!unsynced.length)return;
+  const o=isCur?opts:loadJSON(K_OPT(x.id),null);
+  const name=(o&&o.store&&o.store.name)||x.name||'未命名品牌';
+  /* 品牌時間要比刪除標記新，匯入時才會蓋過刪除（兩台手機時鐘可能有落差） */
+  const stamp=Math.max(Date.now(),(x.updatedAt||0)+1);
+  const json=JSON.stringify({
+    brands:[{id:x.id,name:name,updatedAt:stamp}],
+    data:{[x.id]:{records:recs,opts:o}},
+    exportedAt:new Date().toISOString(),
+    note:'這個品牌在其他裝置被刪除前，這台手機還沒同步的資料'
+  },null,2);
+  /* 檔名只用英數（品牌 id），部分瀏覽器遇到中文檔名會改成 download */
+  const fname='pulipuli-rescue-'+String(x.id).replace(/[^A-Za-z0-9_-]/g,'')+'-'+fmtD(new Date())+'.json';
+  const dl=()=>downloadText(json,fname);
+  try{dl();}catch(e){}
+  addNotice('⚠️ 品牌「'+name+'」已在其他裝置刪除。這台手機有 '+unsynced.length+' 筆還沒同步的紀錄，已先下載成備份檔「'+fname+'」；需要時到設定 → 雲端同步 → 匯入 JSON 就能救回。',
+    {label:'再下載一次',fn:dl});
+}
+/* 常駐通知橫幅：不會自己消失，按「知道了」才收起；文字一律用 textContent，不拼進 innerHTML */
+const notices=[];
+function addNotice(text,action){notices.push({text:text,action:action||null});renderNotices();}
+function renderNotices(){
+  const b=document.getElementById('noticeBanner');
+  if(!b)return;
+  b.textContent='';
+  if(!notices.length){b.classList.remove('show');return;}
+  notices.forEach(n=>{
+    const row=document.createElement('div'); row.className='nb-row';
+    const t=document.createElement('span'); t.textContent=n.text; row.appendChild(t);
+    if(n.action){
+      const btn=document.createElement('button'); btn.className='nb-btn';
+      btn.textContent=n.action.label; btn.onclick=n.action.fn; row.appendChild(btn);
+    }
+    b.appendChild(row);
+  });
+  const c=document.createElement('button'); c.className='nb-close'; c.textContent='知道了';
+  c.onclick=()=>{notices.length=0;renderNotices();};
+  b.appendChild(c);
+  b.classList.add('show');
 }
 /* 品牌墓碑保留 90 天，讓其他裝置有時間同步到「已刪除」 */
 function purgeBrands(arr){
@@ -910,9 +984,10 @@ function ensureCurBrand(){
     return;
   }
   if(!a.some(b=>b.id===curBrand)){
+    const oldName=(opts&&opts.store&&opts.store.name)||'目前的品牌';
     curBrand=a[0].id; localStorage.setItem(LS_CURB,curBrand);
     loadBrandData(); go(curPage);
-    toast('目前品牌已在其他裝置刪除，已切換到「'+brandName(curBrand)+'」');
+    addNotice('目前的品牌「'+oldName+'」已在其他裝置刪除，已切換到「'+brandName(curBrand)+'」。');
   }
 }
 function closeBrandSheet(){
