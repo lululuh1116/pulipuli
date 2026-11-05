@@ -1662,6 +1662,13 @@ function legendHTML(data,total){
   }).join('')+'</div>';
 }
 
+/* 收支圓餅：開抽成時切成「抽成後收入／抽成／支出」三塊，三塊加總＝總收入＋支出 */
+function financePieData(inSum,commission,exSum,withComm){
+  const S=curSet();
+  return withComm
+    ?[{label:'抽成後收入',value:Math.max(0,inSum-commission),color:S.pieIn},{label:'工作室抽成',value:commission,color:S.brownSoft},{label:'支出',value:exSum,color:S.pieEx}]
+    :[{label:'收入',value:inSum,color:S.pieIn},{label:'支出',value:exSum,color:S.pieEx}];
+}
 function renderRep(){
   const per=periodFilter();
   $('#repPerLabel').textContent=per.label;
@@ -1679,15 +1686,14 @@ function renderRep(){
 
   /* 收支圓餅 */
   $('#repPieTitle').textContent=per.label+'・收支圓餅圖';
-  const pieData=comm.enabled
-    ?[{label:'總收入',value:inSum,color:curSet().pieIn},{label:'工作室抽成',value:commission,color:curSet().brownSoft},{label:'支出',value:exSum,color:curSet().pieEx}]
-    :[{label:'收入',value:inSum,color:curSet().pieIn},{label:'支出',value:exSum,color:curSet().pieEx}];
+  const pieData=financePieData(inSum,commission,exSum,comm.enabled);
+  const pieTotal=inSum+exSum;   /* 抽成後收入＋抽成＝總收入，不再把總收入和抽成重複算 */
   let financeHtml='';
-  if((inSum+commission+exSum)>0){
-    financeHtml=legendHTML(pieData,inSum+commission+exSum);
+  if(pieTotal>0){
+    financeHtml=legendHTML(pieData,pieTotal);
     if(comm.enabled){
       financeHtml+='<div style="width:100%;text-align:center;font-size:13px;line-height:1.9;color:var(--brown-soft)">'+
-        '抽成後收入 <b style="color:var(--brown);font-size:16px">'+money(netRevenue)+'</b>　'+
+        '總收入 <b style="color:var(--brown);font-size:16px">'+money(inSum)+'</b>　'+
         '最終淨額 <b style="color:'+(finalNet<0?'var(--red)':'var(--brown)')+';font-size:16px">'+money(finalNet)+'</b>'+
         (repPer==='day'?'<br>本月截至此日累積抽成 <b>'+money(comm.monthToDate)+'</b>'+(comm.cap==null?'（無上限）':' / '+money(comm.cap)):'')+
         '</div>';
@@ -3042,7 +3048,7 @@ async function exportReport(){
   const W=1080,PAD=56,CW=W-PAD*2;
   const SET=curSet();
   const BROWN=SET.ink, BROWN2=SET.brown2, SOFT=SET.brownSoft;
-  const hCardA=(inSum+exSum+commission)>0?(comm.enabled?470:400):200;
+  const hCardA=(inSum+exSum)>0?(comm.enabled?470:400):200;
   const hCardB=comm.enabled?300:250;
   /* [FIX] 服務佔比卡片高度改依項目數計算，6 個項目時圖例才不會爆出卡片 */
   const hCardC=svcTotal>0?Math.max(370,140+svcData.length*46):200;
@@ -3103,18 +3109,16 @@ async function exportReport(){
 
   /* A. 收支圓餅 */
   let top=card(hCardA,per.label+'・收支圓餅圖');
-  if((inSum+exSum+commission)>0){
-    const pieData=comm.enabled
-      ?[{label:'總收入',value:inSum,color:curSet().pieIn},{label:'工作室抽成',value:commission,color:curSet().brownSoft},{label:'支出',value:exSum,color:curSet().pieEx}]
-      :[{label:'收入',value:inSum,color:curSet().pieIn},{label:'支出',value:exSum,color:curSet().pieEx}];
-    const pieTotal=inSum+commission+exSum;
+  if((inSum+exSum)>0){
+    const pieData=financePieData(inSum,commission,exSum,comm.enabled);
+    const pieTotal=inSum+exSum;
     donut(PAD+170,top+160,120,pieData,pieTotal);
     let ly=legend(PAD+360,top+90,pieData.filter(d=>d.value>0),pieTotal);
     ctx.fillStyle=SOFT; ctx.font=F('400',26);
     if(comm.enabled){
-      ctx.fillText('抽成後收入',PAD+360,ly+20);
+      ctx.fillText('總收入',PAD+360,ly+20);
       ctx.fillStyle=BROWN; ctx.font=F('800',36);
-      ctx.fillText(money(netRevenue),PAD+530,ly+22);
+      ctx.fillText(money(inSum),PAD+470,ly+22);
       ly+=50;
       ctx.fillStyle=SOFT; ctx.font=F('400',26);
       ctx.fillText('最終淨額',PAD+360,ly+20);
