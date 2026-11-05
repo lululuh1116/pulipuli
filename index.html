@@ -967,9 +967,13 @@ function renderNotices(){
   b.appendChild(c);
   b.classList.add('show');
 }
-/* 品牌墓碑保留 90 天，讓其他裝置有時間同步到「已刪除」 */
+/* 刪除標記（墓碑）保留 1 年：讓其他裝置有時間同步到「已刪除」，
+   也讓一年內的舊備份用「合併」匯入時，已刪除的紀錄與品牌不會復活。
+   （不用「清理水位時間」：很久以前建立、之後沒改過的正常紀錄修改時間也很舊，會被誤擋而掉資料） */
+const TOMB_KEEP_MS=365*864e5;
+/* 品牌墓碑保留期同上 */
 function purgeBrands(arr){
-  const cutoff=Date.now()-90*864e5;
+  const cutoff=Date.now()-TOMB_KEEP_MS;
   return arr.filter(b=>!(b&&b.deleted&&(b.updatedAt||0)<cutoff));
 }
 function ensureCurBrand(){
@@ -4033,10 +4037,9 @@ function mergeRecords(a,b){
   });
   return Object.values(map);
 }
-/* [NEW] 已刪除超過 90 天的紀錄真正移除，避免資料與同步 payload 無限長大。
-   保留 90 天的墓碑是為了讓其他裝置有充分時間同步到「已刪除」狀態 */
+/* 已刪除超過 1 年（TOMB_KEEP_MS）的紀錄真正移除，避免資料與同步內容無限長大 */
 function purgeDeleted(arr){
-  const cutoff=Date.now()-90*864e5;
+  const cutoff=Date.now()-TOMB_KEEP_MS;
   return arr.filter(r=>!(r&&r.deleted&&(r.updatedAt||0)<cutoff));
 }
 /* 舊格式（單一品牌 {records,opts}）自動包成 b_main，換裝置或舊備份都接得回來 */
