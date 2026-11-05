@@ -942,7 +942,7 @@ function rescueDeletedBrand(x){
   const fname='pulipuli-rescue-'+String(x.id).replace(/[^A-Za-z0-9_-]/g,'')+'-'+fmtD(new Date())+'.json';
   const dl=()=>downloadText(json,fname);
   try{dl();}catch(e){}
-  addNotice('⚠️ 品牌「'+name+'」已在其他裝置刪除。這台手機有 '+unsynced.length+' 筆還沒同步的紀錄，已先下載成備份檔「'+fname+'」；需要時到設定 → 雲端同步 → 匯入 JSON 就能救回。',
+  addNotice('⚠️ 品牌「'+name+'」已在其他裝置刪除。這台手機有 '+unsynced.length+' 筆還沒同步的紀錄，已先下載成備份檔「'+fname+'」。需要時到設定 → 雲端同步 → 匯入 JSON 就能救回；注意：匯入後這個品牌會在所有手機恢復（包含刪除它的那台）。',
     {label:'再下載一次',fn:dl});
 }
 /* 常駐通知橫幅：不會自己消失，按「知道了」才收起；文字一律用 textContent，不拼進 innerHTML */
