@@ -993,8 +993,14 @@ function markSave(kind,ok){
   b.textContent=what?'⚠️ 存檔失敗：這台裝置的儲存空間已滿，剛才的'+what+'可能沒有存到。請到設定移除背景圖後再操作一次。':'';
   b.classList.toggle('show',!!what);
 }
+/* 同一支手機開兩個分頁時，各自記憶體裡的 records 會互相蓋掉：
+   存檔前先讀回 localStorage 裡的版本，用 mergeRecords（逐筆比 updatedAt）合併後再寫回 */
 function saveRecords(){
-  try{localStorage.setItem(K_REC(),JSON.stringify(records));markSave('rec',true);return true;}
+  try{
+    const stored=loadJSON(K_REC(),[]);
+    if(Array.isArray(stored)&&stored.length)records=purgeDeleted(mergeRecords(stored,records));
+    localStorage.setItem(K_REC(),JSON.stringify(records));markSave('rec',true);return true;
+  }
   catch(e){markSave('rec',false);return false;}
 }
 function saveOpts(){
@@ -4223,6 +4229,28 @@ async function syncNow(manual){
     syncing=false;
   }
 }
+
+/* ========= 多分頁同步：另一個分頁改了資料，這個分頁重新載入、重畫 ========= */
+window.addEventListener('storage',e=>{
+  if(!e.key||e.storageArea!==localStorage)return;
+  if(e.key===K_REC()){
+    /* 只合併進記憶體、不寫回，避免兩個分頁來回觸發 */
+    const other=loadJSON(K_REC(),[]);
+    if(Array.isArray(other))records=purgeDeleted(mergeRecords(records,other));
+  }else if(e.key===K_OPT()){
+    const o=loadJSON(K_OPT(),null);
+    if(!o)return;
+    opts=o; ensureSched(); loadThemeObj(); applyTheme();
+  }else if(e.key===LS_BRANDS){
+    const b=loadJSON(LS_BRANDS,null);
+    if(!Array.isArray(b))return;
+    brands=b; ensureCurBrand(); applyTheme();
+  }else if(e.key===LS_SYNC){
+    syncCfg=loadJSON(LS_SYNC,syncCfg);
+    return;
+  }else return;
+  go(curPage);
+});
 
 /* ========= 啟動 ========= */
 applyTheme();
