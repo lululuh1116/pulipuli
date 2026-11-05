@@ -3871,6 +3871,23 @@ function buildSyncTab(body){
   const eNote=document.createElement('div'); eNote.className='note-mini';
   eNote.textContent='匯出的備份包含所有品牌；匯入時會依品牌合併，不會蓋掉其他品牌的資料。';
   card.appendChild(eNote);
+  /* 匯入方式：預設合併；「以備份為準」會把本機已刪除、備份裡還在的紀錄取消刪除 */
+  importMode='merge';
+  const imF=document.createElement('div'); imF.className='field';
+  const imL=document.createElement('label'); imL.textContent='匯入 JSON 的方式'; imF.appendChild(imL);
+  [['merge','合併（預設）'],['restore','以備份為準（還原已刪除）']].forEach(([v,lab])=>{
+    const row=document.createElement('label'); row.className='check-row';
+    row.style.cssText='display:flex;align-items:center;margin-top:8px;font-weight:600;min-height:32px';
+    const rb=document.createElement('input'); rb.type='radio'; rb.name='importMode'; rb.value=v; rb.checked=(importMode===v);
+    rb.onchange=()=>{if(rb.checked)importMode=v;};
+    row.appendChild(rb); row.appendChild(document.createTextNode(lab));
+    imF.appendChild(row);
+  });
+  const imN=document.createElement('div'); imN.className='note-mini';
+  imN.textContent='合併：備份裡的紀錄會加進來，這台手機比較新的修改會保留；但合併無法復原已刪除的紀錄。'+
+    '以備份為準：備份裡有、這台手機已刪除的紀錄（和品牌）會取消刪除，同步後其他手機也會跟著恢復。';
+  imF.appendChild(imN);
+  card.appendChild(imF);
   body.appendChild(card);
 
   const saveToken=()=>{
@@ -3928,18 +3945,24 @@ $('#bgFile').onchange=e=>{
   fr.readAsDataURL(f);
 };
 
+let importMode='merge';
 $('#importFile').onchange=e=>{
   const f=e.target.files[0]; if(!f)return;
+  const restore=(importMode==='restore');
   const rd=new FileReader();
   rd.onload=()=>{
     try{
       const p=normalizePayload(JSON.parse(rd.result));
       if(!p)throw 0;
-      applyRemotePayload(p);
+      const st=applyRemotePayload(p,{restoreDeleted:restore})||{restored:0};
       scheduleSync();
       loadBrandData(); go(curPage);
-      toast('匯入完成，共 '+(p.brands||[]).filter(b=>!b.deleted).length+' 個品牌');
+      toast('匯入完成，共 '+(p.brands||[]).filter(b=>!b.deleted).length+' 個品牌'+(restore?'，還原 '+st.restored+' 筆已刪除的紀錄':''));
     }catch(err){toast('檔案格式不正確，匯入失敗');}
+    /* 用完回到預設的「合併」，避免下次匯入誤用 */
+    importMode='merge';
+    const rm=document.querySelector('input[name=importMode][value=merge]');
+    if(rm)rm.checked=true;
   };
   rd.readAsText(f);
   e.target.value='';
@@ -4174,9 +4197,32 @@ function collectAll(){
   });
   return data;
 }
-function applyRemotePayload(raw){
+function applyRemotePayload(raw,opt){
   const r=sanitizePayload(normalizePayload(raw));
   if(!r)return;
+  let restored=0;
+  /* 匯入「以備份為準（還原已刪除）」：備份裡還在、本機標記刪除的品牌與紀錄，
+     把備份那份的時間改成現在（並比刪除標記新），合併時就會蓋過刪除，同步後其他裝置也會恢復 */
+  if(opt&&opt.restoreDeleted){
+    const now=Date.now();
+    r.brands.forEach(b=>{
+      if(b.deleted)return;
+      const lb=brands.find(x=>x.id===b.id);
+      if(lb&&lb.deleted)b.updatedAt=Math.max(now,(lb.updatedAt||0)+1);
+    });
+    Object.keys(r.data).forEach(id=>{
+      const d=r.data[id];
+      if(!d||!Array.isArray(d.records))return;
+      const local=(id===curBrand)?records:loadJSON(K_REC(id),[]);
+      const byId={};
+      (Array.isArray(local)?local:[]).forEach(x=>{if(x&&x.id)byId[x.id]=x;});
+      d.records.forEach(rec=>{
+        if(rec.deleted)return;
+        const lx=byId[rec.id];
+        if(lx&&lx.deleted){rec.updatedAt=Math.max(now,(lx.updatedAt||0)+1);restored++;}
+      });
+    });
+  }
   brands=purgeBrands(mergeBrands(brands,r.brands||[]));
   const data=r.data||{};
   Object.keys(data).forEach(id=>{
@@ -4199,6 +4245,7 @@ function applyRemotePayload(raw){
   });
   saveBrandsLocal();
   ensureCurBrand();
+  return {restored:restored};
 }
 function setSyncUI(state,msg){
   const dot=$('#syncDot');
