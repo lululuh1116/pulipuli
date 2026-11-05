@@ -2142,6 +2142,8 @@ function prefillIncome(r){
   const findBy=(arr,it)=>arr.find(o=>o.name===it.name&&o.price===it.price)||arr.find(o=>o.name===it.name);
   /* [FIX] 補上 extraName、monthlyName，避免編輯後按 OK 時 undefined.trim() 閃退 */
   inSel={base:null,addons:[],extra:'',extraName:'',removal:null,freeRemoval:false,pct:null,fixed:null,custom:'',note:r.note||'',customer:r.customer||'',monthly:'',monthlyName:'',commissionRate:String(Math.round(recordCommissionRate(r)*1000)/10)};
+  /* 結帳時收的訂金：編輯時回填，底部才會照樣顯示「已收訂金／現場應收」 */
+  inSel.depositPaid=(typeof r.deposit==='number'&&r.deposit>0)?r.deposit:0;
   exSel={cat:Object.keys(opts.expCats)[0],items:[],other:'',note:''};
   calcExpr='';
   if(bd.base){
@@ -2714,7 +2716,9 @@ $('#okBtn').onclick=()=>{
       commissionRate:(()=>{let p=Number(inSel.commissionRate);if(!isFinite(p))p=0;return Math.max(0,Math.min(1,p/100));})(),
       bkTime:(checkoutBkInfo&&checkoutBkInfo.bkTime)||'',
       bkChannel:(checkoutBkInfo&&checkoutBkInfo.bkChannel)||'',
-      fromBooking:!!checkoutBkInfo
+      fromBooking:!!checkoutBkInfo,
+      /* 結帳時已收的訂金（金額仍記全額，訂金也是收入） */
+      deposit:(inSel.depositPaid>0)?inSel.depositPaid:0
     });
     toast(wasEditing?'已更新紀錄 '+money(incomeTotal()):'已記錄收入 '+money(incomeTotal()));
     checkoutBkInfo=null;
@@ -4087,6 +4091,7 @@ function sanitizeRecord(r){
   o.bkTime=toTime(r.bkTime);
   o.bkChannel=toStr(r.bkChannel,50);
   o.fromBooking=r.fromBooking===true;
+  if(r.deposit!=null){const dep=toNum(r.deposit);if(dep!=null&&dep>0)o.deposit=dep;}
   return o;
 }
 const sanitizeRecords=a=>Array.isArray(a)?a.map(sanitizeRecord).filter(Boolean):[];
