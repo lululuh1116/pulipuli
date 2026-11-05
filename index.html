@@ -1088,6 +1088,14 @@ function saveOpts(){
 }
 function saveSync(){localStorage.setItem(LS_SYNC,JSON.stringify(syncCfg))}
 const live=()=>records.filter(r=>!r.deleted);
+/* 這筆紀錄是否已在別處被刪除：記憶體（含同步、其他分頁合併進來的）或本機儲存裡較新的版本已標記刪除 */
+function deletedElsewhere(id){
+  const m=records.find(x=>x.id===id);
+  if(!m||m.deleted)return true;
+  const st=loadJSON(K_REC(),[]);
+  const s=Array.isArray(st)?st.find(x=>x&&x.id===id):null;
+  return !!(s&&s.deleted&&(s.updatedAt||0)>=(m.updatedAt||0));
+}
 
 /* ========= 外觀主題（配色雲端同步，字體與背景圖只存這台裝置） ========= */
 const LS_THEME='pp_theme';
@@ -2692,7 +2700,19 @@ function renderExpense(body){
 /* ---- OK 記錄 ---- */
 $('#okBtn').onclick=()=>{
   const wasEditing=editingId;
-  const save=rec=>{ if(wasEditing)updateRecord(wasEditing,rec); else addRecord(rec); };
+  /* 編輯中的這筆已在其他裝置（或另一個分頁）被刪除：不要默默救回來，先問；預設放棄 */
+  let recreate=false;
+  if(wasEditing&&deletedElsewhere(wasEditing)){
+    if(confirm('這筆已在其他裝置刪除。\n\n按「確定」：放棄這次修改（建議）\n按「取消」：用目前填的內容重新建一筆新的紀錄')){
+      checkoutBkInfo=null;
+      closeEntry(); go(curPage);
+      toast('已放棄修改：這筆已在其他裝置刪除');
+      return;
+    }
+    recreate=true;
+  }
+  const editingNow=!!(wasEditing&&!recreate);
+  const save=rec=>{ if(editingNow)updateRecord(wasEditing,rec); else addRecord(rec); };
   if(entryMode==='income'){
     const mo=parseFloat(inSel.monthly);
     /* [FIX] monthlyName/extraName 加 (||'') 防呆，優惠款加 isMonthly 旗標供編輯時辨識 */
@@ -2728,7 +2748,7 @@ $('#okBtn').onclick=()=>{
       /* 結帳時已收的訂金（金額仍記全額，訂金也是收入） */
       deposit:(inSel.depositPaid>0)?inSel.depositPaid:0
     });
-    toast(wasEditing?'已更新紀錄 '+money(incomeTotal()):'已記錄收入 '+money(incomeTotal()));
+    toast(editingNow?'已更新紀錄 '+money(incomeTotal()):'已記錄收入 '+money(incomeTotal()));
     checkoutBkInfo=null;
   }else if(entryMode==='expense'){
     const amt=calcTotal();
@@ -2739,7 +2759,7 @@ $('#okBtn').onclick=()=>{
       type:'expense', date:editDate, amount:amt,
       category:exSel.cat, items:items, discount:null, note:exSel.note.trim()
     });
-    toast(wasEditing?'已更新紀錄 '+money(amt):'已記錄支出 '+money(amt));
+    toast(editingNow?'已更新紀錄 '+money(amt):'已記錄支出 '+money(amt));
   }
   if(entryMode==='booking'){
     if(!bkSel.name.trim())return;
@@ -2775,7 +2795,7 @@ $('#okBtn').onclick=()=>{
       planNote:bkSel.planNote.trim(),
       deposit:(!isNaN(dep)&&dep>0)?dep:0
     });
-    toast(wasEditing?'已更新預約':'已新增預約：'+bkSel.name.trim());
+    toast(editingNow?'已更新預約':'已新增預約：'+bkSel.name.trim());
   }
   /* 存完讓月曆（與總紀錄的週次）跳到這筆的日期 */
   const savedDate=editDate;
