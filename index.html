@@ -925,7 +925,8 @@ function rescueDeletedBrand(x){
   const recs=isCur?records:loadJSON(K_REC(x.id),null);
   if(!Array.isArray(recs))return;          /* 本機沒有這個品牌的資料（例如就是在這台刪的） */
   const last=(syncCfg&&syncCfg.last)||0;
-  const unsynced=recs.filter(r=>r&&!r.deleted&&(r.updatedAt||0)>last);
+  /* >=：跟打包時間同一毫秒改的也算還沒同步（寧可多救，不要漏） */
+  const unsynced=recs.filter(r=>r&&!r.deleted&&(last===0||(r.updatedAt||0)>=last));
   if(!unsynced.length)return;
   const o=isCur?opts:loadJSON(K_OPT(x.id),null);
   const name=(o&&o.store&&o.store.name)||x.name||'未命名品牌';
@@ -4402,6 +4403,9 @@ async function syncNow(manual){
       }
     }
     /* 上傳 */
+    /* 上傳內容是在這一刻同步打包的；「上次同步」記成打包當下的時間，
+       打包之後（等待上傳時）才改的紀錄 updatedAt 一定 >= 這個時間，會被當成「還沒同步」 */
+    const packedAt=Date.now();
     /* 不縮排，減少上傳流量 */
     const payload=JSON.stringify({brands:brands,data:collectAll(),syncedAt:new Date().toISOString()});
     if(!syncCfg.gistId){
@@ -4417,7 +4421,7 @@ async function syncNow(manual){
       const res=await gh('PATCH','/gists/'+syncCfg.gistId,{files:{[GIST_FILE]:{content:payload}}});
       if(!res.ok)throw new Error('上傳失敗 '+res.status);
     }
-    syncCfg.last=Date.now(); syncCfg.syncedGist=syncCfg.gistId; saveSync();
+    syncCfg.last=packedAt; syncCfg.syncedGist=syncCfg.gistId; saveSync();
     setSyncUI('ok','上次同步：'+new Date(syncCfg.last).toLocaleString('zh-TW',{hour12:false}));
     if(manual)toast('同步完成 ☁️');
     if(curPage==='cal')renderCal();
