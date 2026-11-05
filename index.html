@@ -165,7 +165,9 @@ main{padding:14px 16px 120px;max-width:560px;margin:0 auto}
 .rec-li .amt{font-weight:800;font-size:14.5px;white-space:nowrap}
 .rec-li .amt.in{color:var(--in-deep,var(--brown))}
 .rec-li .amt.ex{color:var(--red)}
-.rec-li .del{font-size:15px;padding:6px;opacity:.65}
+.rec-li .del{font-size:15px;padding:6px;opacity:.65;min-height:40px;min-width:40px}
+/* 手機上好按：日期面板的小按鈕至少 40px 高 */
+.day-panel .mini-btn{min-height:40px}
 
 /* FAB */
 .fab{
@@ -3976,8 +3978,10 @@ $('#importFile').onchange=e=>{
 /* ========= GitHub Gist 同步引擎 ========= */
 const GIST_FILE='pulipuli-data.json';
 let syncTimer=null, syncing=false;
+let syncPending=false;   /* 同步進行中又有新改動：這次同步結束後自動再同步一次 */
 function scheduleSync(){
   if(!syncCfg||!syncCfg.token)return;
+  if(syncing)syncPending=true;
   clearTimeout(syncTimer);
   syncTimer=setTimeout(()=>syncNow(false),2000);
 }
@@ -4269,7 +4273,8 @@ function refreshSyncStatus(){
 }
 async function syncNow(manual){
   if(!syncCfg.token){if(manual)toast('請先在設定貼上 GitHub 權杖');return;}
-  if(syncing)return;
+  if(syncing){syncPending=true;return;}
+  syncPending=false;
   syncing=true;
   setSyncUI('busy','同步中…');
   try{
@@ -4356,6 +4361,11 @@ async function syncNow(manual){
     if(manual)toast('同步失敗，請檢查網路與權杖');
   }finally{
     syncing=false;
+    if(syncPending){
+      syncPending=false;
+      clearTimeout(syncTimer);
+      syncTimer=setTimeout(()=>syncNow(false),500);
+    }
   }
 }
 
