@@ -140,6 +140,13 @@ main{padding:14px 16px 120px;max-width:560px;margin:0 auto}
 .day .dots i.in{background:var(--in-deep,var(--accent-deep))}
 .day .dots i.ex{background:var(--ex-main,var(--pink-deep))}
 .day .dots i.bk{background:var(--bk-dot,#9DBB8F)}
+/* 其他品牌的預約：空心小圈，跟自己的預約分得開 */
+.day .dots i.ob{background:transparent;box-shadow:inset 0 0 0 1.5px var(--ob-dot,#E0894A);width:5px;height:5px}
+#dualBar{display:flex;justify-content:flex-end;margin-bottom:8px}
+#dualBar .mini-btn{padding:6px 12px;font-size:12px}
+.rec-li.other{box-shadow:inset 3px 0 0 var(--ob-dot,#E0894A);padding-left:12px;opacity:.95}
+.rec-li .ob-tag{display:inline-block;font-size:10.5px;font-weight:700;padding:1px 7px;border-radius:999px;margin-right:6px;background:var(--ob-dot,#E0894A);color:#fff;vertical-align:1px}
+.ob-busy{font-size:12px;color:var(--brown-soft);background:var(--milk);border-radius:var(--r-sm,10px);padding:8px 10px;margin:4px 0 8px}
 .day.dim{opacity:.28}
 
 /* 當日收支方框 */
@@ -431,6 +438,7 @@ main{padding:14px 16px 120px;max-width:560px;margin:0 auto}
 <main>
   <!-- 頁面 1：月曆 -->
   <section class="page on" id="pageCal">
+    <div id="dualBar"></div>
     <div id="bkNotice"></div>
     <div class="card">
       <div class="cal-head">
@@ -1095,6 +1103,50 @@ function saveSync(){localStorage.setItem(LS_SYNC,JSON.stringify(syncCfg))}
 /* 畫面、報表、統計只看認得的紀錄類型；別台新版才有的類型原樣保留在資料裡，但絕不畫到畫面上 */
 const REC_TYPES=['income','expense','booking'];
 const live=()=>records.filter(r=>!r.deleted&&REC_TYPES.indexOf(r.type)>=0);
+
+/* ===== 多品牌一起看預約（同一支手機裡的其他品牌） =====
+   開關只存在這支手機（pp_dualView），不同步、不寫進任何品牌的設定。
+   其他品牌的紀錄只讀、不改；要改就切過去那個品牌。 */
+const LS_DUAL='pp_dualView';
+let dualView=localStorage.getItem(LS_DUAL)==='1';
+function setDualView(on){
+  dualView=!!on;
+  try{localStorage.setItem(LS_DUAL,dualView?'1':'0');}catch(e){}
+}
+const _otherCache={};
+function otherBrandRecs(id){
+  const k=K_REC(id), raw=localStorage.getItem(k)||'';
+  const c=_otherCache[k];
+  if(c&&c.raw===raw)return c.list;
+  let arr=[]; try{arr=raw?JSON.parse(raw):[];}catch(e){arr=[];}
+  const list=Array.isArray(arr)?arr.filter(r=>r&&!r.deleted&&REC_TYPES.indexOf(r.type)>=0):[];
+  _otherCache[k]={raw:raw,list:list};
+  return list;
+}
+function otherBrandIds(){return aliveBrands().map(b=>b.id).filter(id=>id!==curBrand);}
+/* 其他品牌的預約（會附上品牌 id）；date 不給就回全部 */
+function otherBookings(date){
+  const out=[];
+  otherBrandIds().forEach(id=>{
+    otherBrandRecs(id).forEach(r=>{
+      if(r.type!=='booking')return;
+      if(date&&r.date!==date)return;
+      out.push(Object.assign({},r,{_brand:id}));
+    });
+  });
+  return out.sort((a,b)=>(a.time||'99').localeCompare(b.time||'99'));
+}
+/* 這一天人在其他品牌：那邊有預約或有結帳收入。回傳 [{id, n}]，沒有就空陣列
+   （一天只會在一間店 → 這一天在這間店的預約表要整天擋掉） */
+function otherBusy(ds){
+  const out=[];
+  otherBrandIds().forEach(id=>{
+    const n=otherBrandRecs(id).filter(r=>r.date===ds&&(r.type==='booking'||r.type==='income')).length;
+    if(n)out.push({id:id,n:n});
+  });
+  return out;
+}
+function otherBusyText(list){return list.map(x=>brandName(x.id)).join('、');}
 /* 這筆紀錄是否已在別處被刪除：記憶體（含同步、其他分頁合併進來的）或本機儲存裡較新的版本已標記刪除 */
 function deletedElsewhere(id){
   const m=records.find(x=>x.id===id);
@@ -1387,8 +1439,21 @@ document.addEventListener('visibilitychange',()=>{
 $('#calPrev').onclick=()=>{calM--;if(calM<0){calM=11;calY--;}renderCal();};
 $('#calNext').onclick=()=>{calM++;if(calM>11){calM=0;calY++;}renderCal();};
 
+function renderDualBar(){
+  const bar=$('#dualBar'); if(!bar)return;
+  bar.innerHTML='';
+  const others=otherBrandIds();
+  if(!others.length)return;
+  const b=document.createElement('button');
+  b.className='mini-btn'+(dualView?' solid':'');
+  const nm=others.length===1?brandName(others[0]):'其他品牌';
+  b.textContent=(dualView?'👀 正在一起看 ':'👀 一起看 ')+nm+' 的預約'+(dualView?'（點我關閉）':'');
+  b.onclick=()=>{setDualView(!dualView);renderCal();toast(dualView?'已開啟：一起看 '+nm+' 的預約':'已關閉，只看這一家');};
+  bar.appendChild(b);
+}
 function renderCal(){
   refreshToday();
+  renderDualBar();
   $('#calTitle').textContent=calY+'年 '+(calM+1)+'月';
   const grid=$('#calGrid'); grid.innerHTML='';
   const first=new Date(calY,calM,1);
@@ -1398,13 +1463,17 @@ function renderCal(){
     if(!dayMap[r.date])dayMap[r.date]={in:false,ex:false,bk:false};
     dayMap[r.date][r.type==='income'?'in':r.type==='expense'?'ex':'bk']=true;
   });
+  if(dualView)otherBookings().forEach(r=>{
+    if(!dayMap[r.date])dayMap[r.date]={in:false,ex:false,bk:false};
+    dayMap[r.date].ob=true;
+  });
   for(let i=0;i<first.getDay();i++){const b=document.createElement('button');b.className='day dim';b.disabled=true;grid.appendChild(b);}
   for(let d=1;d<=days;d++){
     const ds=calY+'-'+pad(calM+1)+'-'+pad(d);
     const b=document.createElement('button');
     b.className='day'+(ds===fmtD(today)?' today':'')+(ds===selDate?' sel':'');
     const dots=dayMap[ds]||{};
-    b.innerHTML='<span class="num">'+d+'</span><span class="dots">'+(dots.in?'<i class="in"></i>':'')+(dots.ex?'<i class="ex"></i>':'')+(dots.bk?'<i class="bk"></i>':'')+'</span>';
+    b.innerHTML='<span class="num">'+d+'</span><span class="dots">'+(dots.in?'<i class="in"></i>':'')+(dots.ex?'<i class="ex"></i>':'')+(dots.bk?'<i class="bk"></i>':'')+(dots.ob?'<i class="ob"></i>':'')+'</span>';
     b.onclick=()=>{selDate=ds;renderCal();};
     grid.appendChild(b);
   }
@@ -1418,13 +1487,14 @@ function renderBkNotice(){
   box.innerHTML='';
   const days=[[fmtD(today),'今天'],[fmtD(new Date(today.getTime()+864e5)),'明天']];
   days.forEach(([ds,label])=>{
-    const bks=live().filter(r=>r.type==='booking'&&r.date===ds)
-      .sort((a,b)=>(a.time||'99').localeCompare(b.time||'99'));
+    let bks=live().filter(r=>r.type==='booking'&&r.date===ds);
+    if(dualView)bks=bks.concat(otherBookings(ds));
+    bks.sort((a,b)=>(a.time||'99').localeCompare(b.time||'99'));
     if(!bks.length)return;
     const div=document.createElement('div');
     div.style.cssText='background:var(--bk-bg);border:1px solid var(--bk-line);border-radius:var(--r-md);padding:10px 14px;margin-bottom:10px;font-size:13px;color:var(--ink-body);box-shadow:var(--shadow-sm);cursor:pointer';
     div.innerHTML='<b>📅 '+label+' '+bks.length+' 位預約</b>　'+
-      bks.map(b=>esc((b.time?b.time+' ':'')+b.name)).join('、');
+      bks.map(b=>esc((b.time?b.time+' ':'')+b.name)+(b._brand?'（'+esc(brandName(b._brand))+'）':'')).join('、');
     div.onclick=()=>{
       const d=new Date(ds+'T00:00:00');
       selDate=ds; calY=d.getFullYear(); calM=d.getMonth();
@@ -1467,6 +1537,24 @@ function recSub(r){
   const parts=(r.items||[]).slice();
   if(r.note)parts.push(r.note);
   return parts.join('・')||'—';
+}
+/* 其他品牌的預約：只顯示，不能在這裡改；點了問要不要切過去 */
+function otherLi(r){
+  const li=document.createElement('div'); li.className='rec-li other';
+  const nm=brandName(r._brand);
+  li.innerHTML=
+    '<div class="ic bk">📅</div>'+
+    '<div class="body"><div class="t1"><span class="ob-tag">'+esc(nm)+'</span>'+esc(recTitle(r))+'</div><div class="t2">'+esc(recSub(r))+'</div></div>';
+  li.style.cursor='pointer';
+  li.onclick=()=>{
+    if(!confirm('這是「'+nm+'」的預約，要切換到「'+nm+'」去看或修改嗎？'))return;
+    const ds=r.date;
+    switchBrand(r._brand);
+    const d=new Date(ds+'T00:00:00');
+    selDate=ds; calY=d.getFullYear(); calM=d.getMonth();
+    renderCal();
+  };
+  return li;
 }
 function recLi(r,showDel){
   const li=document.createElement('div'); li.className='rec-li';
@@ -1558,8 +1646,17 @@ function renderDayPanel(){
     list.appendChild(ed);
   }
 
+  /* 這天人在其他品牌：提醒預約表會整天擋掉（不管開關有沒有開） */
+  const busy=otherBusy(selDate);
+  if(busy.length){
+    const nb=document.createElement('div'); nb.className='ob-busy';
+    nb.textContent='📍 這天在「'+otherBusyText(busy)+'」有行程，這一家的預約表這天會整天顯示已約滿。';
+    list.appendChild(nb);
+  }
   const all=live().filter(r=>r.date===selDate);
-  const bks=all.filter(r=>r.type==='booking').sort((a,b)=>(a.time||'99').localeCompare(b.time||'99'));
+  let bks=all.filter(r=>r.type==='booking');
+  if(dualView)bks=bks.concat(otherBookings(selDate));
+  bks.sort((a,b)=>(a.time||'99').localeCompare(b.time||'99'));
   const others=all.filter(r=>r.type!=='booking').sort((a,b)=>a.updatedAt-b.updatedAt);
   const rs=bks.concat(others);
   if(!rs.length){
@@ -1567,7 +1664,7 @@ function renderDayPanel(){
     emp.textContent='這天還沒有紀錄，點右下角「＋」開始記帳 ☁️';
     list.appendChild(emp); return;
   }
-  rs.forEach(r=>list.appendChild(recLi(r,true)));
+  rs.forEach(r=>list.appendChild(r._brand?otherLi(r):recLi(r,true)));
   const hint=document.createElement('div');
   hint.style.cssText='font-size:11px;color:var(--brown-soft);text-align:center;padding-top:6px';
   hint.textContent='點一下紀錄即可修改 ✏️';
@@ -2774,6 +2871,11 @@ $('#okBtn').onclick=()=>{
     if(editDate!==origDate&&isOffDay(editDate)){
       if(!confirm('💤 '+mdLabel(editDate)+' 是公休日，仍要把預約排在這天嗎？'))return;
     }
+    /* 跨店提醒：這天已經排在其他品牌（一天只在一間店） */
+    const busyO=otherBusy(editDate);
+    if(busyO.length&&(editDate!==origDate||!wasEditing)){
+      if(!confirm('📍 '+mdLabel(editDate)+' 你在「'+otherBusyText(busyO)+'」已經有行程，仍要把預約排在這一家嗎？'))return;
+    }
     /* 撞單提醒：同一天且時間相距 90 分鐘內 */
     if(bkSel.time){
       const toMin=t=>{const m=/^(\d{1,2}):(\d{2})$/.exec(t);return m?(+m[1])*60+(+m[2]):null;};
@@ -2835,6 +2937,8 @@ function drawCover(ctx,img,W,H){
 }
 /* 該日已被預約走的時段（預約時間對到最近 90 分鐘內的時段） */
 function takenSlots(ds,slots){
+  /* 一天只會在一間店：這天其他品牌有預約或結帳，這一家整天擋掉 */
+  if(otherBusy(ds).length)return new Set(slots);
   const toMin=t=>{const m=/^(\d{1,2}):(\d{2})$/.exec(t);return m?(+m[1])*60+(+m[2]):null;};
   const taken=new Set();
   live().filter(r=>r.date===ds&&((r.type==='booking'&&r.time)||(r.type==='income'&&r.bkTime))).forEach(b=>{
@@ -4466,6 +4570,10 @@ window.addEventListener('storage',e=>{
     const b=loadJSON(LS_BRANDS,null);
     if(!Array.isArray(b))return;
     brands=b; ensureCurBrand(); applyTheme();
+  }else if(e.key===LS_DUAL){
+    dualView=localStorage.getItem(LS_DUAL)==='1';
+  }else if(e.key.indexOf(LS_REC+'__')===0){
+    /* 其他品牌的紀錄變了（另一個分頁或同步寫入）：重畫，讓一起看和擋時段跟上 */
   }else if(e.key===LS_SYNC){
     syncCfg=loadJSON(LS_SYNC,syncCfg);
     return;
