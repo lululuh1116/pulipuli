@@ -492,6 +492,7 @@ main{padding:14px 16px 120px;max-width:560px;margin:0 auto}
       <button class="pill on" data-per="month">月報表</button>
       <button class="pill" data-per="year">年報表</button>
     </div>
+    <div id="repCombBar" style="display:flex;justify-content:center;margin:2px 0 8px"></div>
     <div class="rep-nav">
       <button class="cal-nav" id="repPrev" aria-label="上一期">‹</button>
       <span id="repPerLabel"></span>
@@ -1723,8 +1724,8 @@ function renderRec(){
 }
 
 /* ========= 工作室抽成 ========= */
-function commissionCfg(){
-  const c=opts.commission||{};
+function commissionCfg(o){
+  const c=((o||opts).commission)||{};
   const rate=(typeof c.rate==='number'&&isFinite(c.rate))?Math.max(0,Math.min(1,c.rate)):0;
   const legacyRate=(typeof c.legacyRate==='number'&&isFinite(c.legacyRate))?Math.max(0,Math.min(1,c.legacyRate)):(c.enabled?rate:0);
   let cap=null;
@@ -1751,9 +1752,9 @@ function custNote(name){
 }
 function newIncomeCommissionRate(customer){return customerCommissionRate(customer);}
 /* 已存收入優先讀取該筆快照；舊版沒有 commissionRate 的收入固定用 legacyRate，不跟著未來預設率變動 */
-function recordCommissionRate(r){
+function recordCommissionRate(r,o){
   if(r&&typeof r.commissionRate==='number'&&isFinite(r.commissionRate))return Math.max(0,Math.min(1,r.commissionRate));
-  return commissionCfg().legacyRate;
+  return commissionCfg(o).legacyRate;
 }
 function incomeRecordsBetween(startDs,endDs){
   return live().filter(r=>r.type==='income'&&r.date>=startDs&&r.date<=endDs);
@@ -1761,39 +1762,54 @@ function incomeRecordsBetween(startDs,endDs){
 function incomeSumBetween(startDs,endDs){
   return incomeRecordsBetween(startDs,endDs).reduce((sum,r)=>sum+r.amount,0);
 }
-function monthCommission(y,m,endDay){
-  const c=commissionCfg();
+function monthCommission(y,m,endDay,recs,o){
+  const c=commissionCfg(o);
   const mm=pad(m+1);
   const last=new Date(y,m+1,0).getDate();
   const d=(endDay==null)?last:Math.max(0,Math.min(last,endDay));
   if(d<=0)return {gross:0,raw:0,commission:0,net:0};
   const start=y+'-'+mm+'-01', end=y+'-'+mm+'-'+pad(d);
-  const rs=incomeRecordsBetween(start,end);
+  const rs=recs?recs.filter(r=>r.type==='income'&&r.date>=start&&r.date<=end):incomeRecordsBetween(start,end);
   const gross=rs.reduce((sum,r)=>sum+r.amount,0);
   /* 報表以每筆已存的 commissionRate 為準；關閉開關只影響「之後新增」的收入，不抹掉歷史抽成 */
-  const raw=rs.reduce((sum,r)=>sum+Math.round(r.amount*recordCommissionRate(r)),0);
+  const raw=rs.reduce((sum,r)=>sum+Math.round(r.amount*recordCommissionRate(r,o)),0);
   const commission=c.monthlyCap==null?raw:Math.min(raw,c.monthlyCap);
   return {gross:gross,raw:raw,commission:commission,net:gross-commission};
 }
 /* 期間抽成：月＝該月；年＝逐月套上限再加總；日＝該日造成的「本月累積抽成增量」 */
+/* 合併看兩家：每家用自己的抽成設定和每月上限各算一次，再加總 */
 function commissionForReport(){
-  const c=commissionCfg();
+  if(!repCombined())return commissionForBrand();
+  const parts=repBrandSets().map(b=>commissionForBrand(b.recs,b.opts));
+  const sum=k=>parts.reduce((t,x)=>t+(x[k]||0),0);
+  const anyNull=k=>parts.some(x=>x[k]==null);
+  return {
+    enabled:parts.some(x=>x.enabled),
+    commission:sum('commission'),
+    gross:anyNull('gross')?null:sum('gross'),
+    net:anyNull('net')?null:sum('net'),
+    monthToDate:anyNull('monthToDate')?null:sum('monthToDate'),
+    cap:null, rate:0, combined:true
+  };
+}
+function commissionForBrand(recs,o){
+  const c=commissionCfg(o);
   const y=repDate.getFullYear(),m=repDate.getMonth();
   if(repPer==='year'){
     let commission=0,gross=0;
     for(let i=0;i<12;i++){
-      const x=monthCommission(y,i);
+      const x=monthCommission(y,i,null,recs,o);
       commission+=x.commission; gross+=x.gross;
     }
     return {enabled:c.enabled||commission>0,commission:commission,gross:gross,net:gross-commission,monthToDate:null,cap:c.monthlyCap,rate:c.rate};
   }
   if(repPer==='month'){
-    const x=monthCommission(y,m);
+    const x=monthCommission(y,m,null,recs,o);
     return {enabled:c.enabled||x.commission>0,commission:x.commission,gross:x.gross,net:x.net,monthToDate:x.commission,cap:c.monthlyCap,rate:c.rate};
   }
   const d=repDate.getDate();
-  const cur=monthCommission(y,m,d);
-  const prev=monthCommission(y,m,d-1);
+  const cur=monthCommission(y,m,d,recs,o);
+  const prev=monthCommission(y,m,d-1,recs,o);
   const delta=Math.max(0,cur.commission-prev.commission);
   return {
     enabled:c.enabled||cur.commission>0,
@@ -1807,6 +1823,42 @@ function commissionForReport(){
 }
 
 /* ========= 報表 ========= */
+/* 兩家合併看：開關只存在這支手機（pp_repCombined），不同步 */
+const LS_REPCOMB='pp_repCombined';
+let repCombinedOn=localStorage.getItem(LS_REPCOMB)==='1';
+function repCombined(){return repCombinedOn&&otherBrandIds().length>0;}
+/* 每個品牌的紀錄＋設定（目前品牌用記憶體裡的） */
+function repBrandSets(){
+  const out=[{id:curBrand,recs:live(),opts:opts}];
+  if(repCombined())otherBrandIds().forEach(id=>{
+    out.push({id:id,recs:otherBrandRecs(id),opts:loadJSON(K_OPT(id),null)||DEFAULT_OPTS});
+  });
+  return out;
+}
+/* 報表用的紀錄：合併時把所有品牌的紀錄放在一起 */
+function repRecs(){
+  if(!repCombined())return live();
+  return repBrandSets().reduce((a,b)=>a.concat(b.recs),[]);
+}
+function repTitleName(){
+  if(!repCombined())return (opts.store&&opts.store.name)||'PuliPuli.Studio';
+  return aliveBrands().map(b=>brandName(b.id)).join(' ＋ ');
+}
+function renderRepCombBar(){
+  const bar=$('#repCombBar'); if(!bar)return;
+  bar.innerHTML='';
+  if(!otherBrandIds().length)return;
+  const b=document.createElement('button');
+  b.className='mini-btn'+(repCombinedOn?' solid':'');
+  b.textContent=repCombinedOn?'📊 正在看兩家合併（點我只看這一家）':'📊 兩家合併看';
+  b.onclick=()=>{
+    repCombinedOn=!repCombinedOn;
+    try{localStorage.setItem(LS_REPCOMB,repCombinedOn?'1':'0');}catch(e){}
+    renderRep();
+    toast(repCombinedOn?'報表已切換成兩家合併':'報表回到只看這一家');
+  };
+  bar.appendChild(b);
+}
 let repPer='month';
 let repDate=new Date();
 $$('#pageRep .pill[data-per]').forEach(b=>b.onclick=()=>{
@@ -1894,13 +1946,14 @@ function financePieData(inSum,commission,exSum,withComm){
 }
 function renderRep(){
   refreshToday();
+  renderRepCombBar();
   const per=periodFilter();
-  $('#repPerLabel').textContent=per.label;
+  $('#repPerLabel').textContent=per.label+(repCombined()?'（兩家合併）':'');
   const isCur=(repPer==='day'&&fmtD(repDate)===fmtD(today))||
     (repPer==='month'&&repDate.getFullYear()===today.getFullYear()&&repDate.getMonth()===today.getMonth())||
     (repPer==='year'&&repDate.getFullYear()===today.getFullYear());
   $('#repToday').style.display=isCur?'none':'';
-  const rs=live().filter(per.test);
+  const rs=repRecs().filter(per.test);
   const inSum=rs.filter(r=>r.type==='income').reduce((s,r)=>s+r.amount,0);
   const exSum=rs.filter(r=>r.type==='expense').reduce((s,r)=>s+r.amount,0);
   const comm=commissionForReport();
@@ -1919,7 +1972,7 @@ function renderRep(){
       financeHtml+='<div style="width:100%;text-align:center;font-size:13px;line-height:1.9;color:var(--brown-soft)">'+
         '總收入 <b style="color:var(--brown);font-size:16px">'+money(inSum)+'</b>　'+
         '最終淨額 <b style="color:'+(finalNet<0?'var(--red)':'var(--brown)')+';font-size:16px">'+money(finalNet)+'</b>'+
-        (repPer==='day'?'<br>本月截至此日累積抽成 <b>'+money(comm.monthToDate)+'</b>'+(comm.cap==null?'（無上限）':' / '+money(comm.cap)):'')+
+        (repPer==='day'?'<br>本月截至此日累積抽成 <b>'+money(comm.monthToDate)+'</b>'+(comm.combined?'（兩家合計，各自套上限）':comm.cap==null?'（無上限）':' / '+money(comm.cap)):'')+
         '</div>';
     }else{
       financeHtml+='<div style="width:100%;text-align:center;font-size:13px;color:var(--brown-soft)">淨額 <b style="color:'+(finalNet<0?'var(--red)':'var(--brown)')+';font-size:16px">'+money(finalNet)+'</b></div>';
@@ -1939,7 +1992,7 @@ function renderRep(){
     else if(repPer==='year'){const p2=y2+'-';ptest=r=>r.date.startsWith(p2);plabel=y2+'年';}
     else{const p2=y2+'-'+pad(m2+1);ptest=r=>r.date.startsWith(p2);plabel=(m2+1)+'月';}
   }
-  const prs=live().filter(ptest);
+  const prs=repRecs().filter(ptest);
   const pIn=prs.filter(r=>r.type==='income').reduce((s,r)=>s+r.amount,0);
   const pV=prs.filter(r=>r.type==='income').length;
   const cmp=(cur,prev,isMoney)=>{
@@ -1956,7 +2009,11 @@ function renderRep(){
     (comm.enabled?'<div class="kpi-sub" style="margin-top:6px"><span>工作室抽成 <b>-'+money(commission).replace(/^-/,'')+'</b></span><span>抽成後收入 <b>'+money(netRevenue)+'</b></span></div>':'')+
     ((pIn>0||pV>0||inSum>0||visits>0)
       ?'<div class="kpi-sub" style="margin-top:6px"><span>vs '+esc(plabel)+'：收入 '+cmp(inSum,pIn,true)+'</span><span>來客 '+cmp(visits,pV,false)+'</span></div>'
-      :'');
+      :'')+
+    (repCombined()?repBrandSets().map(b=>{
+      const bi=b.recs.filter(r=>r.type==='income'&&per.test(r));
+      return '<div class="kpi-sub" style="margin-top:6px"><span>'+esc(brandName(b.id))+'</span><span>收入 <b>'+money(bi.reduce((t,r)=>t+r.amount,0))+'</b>・'+bi.length+' 位</span></div>';
+    }).join(''):'');
 
   /* 服務佔比 */
   const svcMap=Object.create(null);   /* 沒有原型：客人／服務名稱是 __proto__、constructor 也不會出事 */
@@ -1974,7 +2031,7 @@ function renderRep(){
   /* 客流量長條圖（報表期間該年的每月來客數） */
   const y=repDate.getFullYear();
   const counts=Array(12).fill(0);
-  live().forEach(r=>{
+  repRecs().forEach(r=>{
     if(r.type!=='income')return;
     if(r.date.slice(0,4)!=String(y))return;
     counts[parseInt(r.date.slice(5,7),10)-1]++;
@@ -1994,7 +2051,7 @@ function renderRep(){
 
   /* 常客排行（全期間累積） */
   const vipMap=Object.create(null);
-  live().forEach(r=>{
+  repRecs().forEach(r=>{
     if(r.type!=='income')return;
     let name=r.customer||'';
     if(!name&&r.note){const m=/客人：([^・]+)/.exec(r.note);if(m)name=m[1].trim();}
@@ -3253,7 +3310,7 @@ async function exportReport(){
 
   /* —— 與報表頁相同的計算 —— */
   const per=periodFilter();
-  const rs=live().filter(per.test);
+  const rs=repRecs().filter(per.test);
   const inSum=rs.filter(r=>r.type==='income').reduce((s,r)=>s+r.amount,0);
   const exSum=rs.filter(r=>r.type==='expense').reduce((s,r)=>s+r.amount,0);
   const comm=commissionForReport();
@@ -3274,13 +3331,13 @@ async function exportReport(){
   const svcTotal=svcData.reduce((s,d)=>s+d.value,0);
   const yNow=repDate.getFullYear();
   const counts=Array(12).fill(0);
-  live().forEach(r=>{
+  repRecs().forEach(r=>{
     if(r.type!=='income')return;
     if(r.date.slice(0,4)!=String(yNow))return;
     counts[parseInt(r.date.slice(5,7),10)-1]++;
   });
   const vipMap=Object.create(null);
-  live().forEach(r=>{
+  repRecs().forEach(r=>{
     if(r.type!=='income')return;
     let name=r.customer||'';
     if(!name&&r.note){const m=/客人：([^・]+)/.exec(r.note);if(m)name=m[1].trim();}
@@ -3313,9 +3370,9 @@ async function exportReport(){
   const darkBg=btnTextColor(resolvedBg())==='#FFF9F2';
   ctx.fillStyle=darkBg?'#FFFFFF':BROWN; ctx.textAlign='left';
   ctx.font=F('800',46);
-  ctx.fillText(((opts.store&&opts.store.name)||'PuliPuli.Studio')+' 營運報表',PAD,86);
+  ctx.fillText(repTitleName()+' 營運報表',PAD,86);
   ctx.fillStyle=darkBg?'rgba(255,255,255,.75)':SOFT; ctx.font=F('400',28);
-  ctx.fillText(per.label+'　·　產生於 '+fmtD(new Date()),PAD,130);
+  ctx.fillText(per.label+(repCombined()?'（兩家合併）':'')+'　·　產生於 '+fmtD(new Date()),PAD,130);
 
   let y=170;
   const card=(h,title)=>{
@@ -3373,7 +3430,7 @@ async function exportReport(){
       ctx.fillText(money(finalNet),PAD+500,ly+22);
       if(repPer==='day'){
         ly+=50; ctx.fillStyle=SOFT; ctx.font=F('400',24);
-        ctx.fillText('本月截至此日累積抽成 '+money(comm.monthToDate)+(comm.cap==null?'（無上限）':' / '+money(comm.cap)),PAD+360,ly+16);
+        ctx.fillText('本月截至此日累積抽成 '+money(comm.monthToDate)+(comm.combined?'（兩家合計）':comm.cap==null?'（無上限）':' / '+money(comm.cap)),PAD+360,ly+16);
       }
     }else{
       ctx.fillText('淨額',PAD+360,ly+26);
@@ -4570,6 +4627,8 @@ window.addEventListener('storage',e=>{
     const b=loadJSON(LS_BRANDS,null);
     if(!Array.isArray(b))return;
     brands=b; ensureCurBrand(); applyTheme();
+  }else if(e.key===LS_REPCOMB){
+    repCombinedOn=localStorage.getItem(LS_REPCOMB)==='1';
   }else if(e.key===LS_DUAL){
     dualView=localStorage.getItem(LS_DUAL)==='1';
   }else if(e.key.indexOf(LS_REC+'__')===0){
