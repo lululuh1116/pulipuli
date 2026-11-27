@@ -9,12 +9,12 @@
  */
 const CONFIG = {
   BACKUP_URL: '在這裡貼上雲端備份網址',     // https://gist.githubusercontent.com/帳號/備份ID/raw/pulipuli-data.json
-  CALENDAR_NAME: '恩恩預約（PuliPuli／OUO FISH+）',
+  CALENDAR_NAME: '恩恩預約表',
   DURATION_MIN: 120,   // 有時間的預約，在日曆上佔多久（分鐘）
   PAST_DAYS: 30,       // 同步範圍：過去幾天
   FUTURE_DAYS: 180,    // 同步範圍：未來幾天
   EVERY_MIN: 15,       // 多久同步一次，只能填 1、5、10、15、30
-  PREFIX: {'ouo_fish.nail': 'OUO', 'Pulipuli.studio': 'PULI'}  // 標題前面的店名縮寫（照 App 裡的店名）；沒列到的店用完整店名
+  STUDIO: {'ouo_fish.nail': 'OUO', 'Pulipuli.studio': 'PULI'}  // 標題裡的工作室簡稱（照 App 裡的店名）；沒列到的店用完整店名
 };
 const TZ_OFFSET = '+08:00';
 const TAG = 'ppKey';
@@ -84,7 +84,7 @@ function buildWanted(payload, fromYmd, toYmd) {
     const d = payload.data[b.id];
     if (!d || !Array.isArray(d.records)) throw new Error('雲端備份缺少「' + (b.name || b.id) + '」的資料，這次不同步');
     const store = (d.opts && d.opts.store && d.opts.store.name) || b.name || '店';
-    const pre = CONFIG.PREFIX[store] || store;
+    const studio = CONFIG.STUDIO[store] || store;
     d.records.forEach(r => {
       if (!r || r.deleted || !r.date || r.date < fromYmd || r.date > toYmd) return;
       let name, time, paid = false;
@@ -93,7 +93,7 @@ function buildWanted(payload, fromYmd, toYmd) {
       else return;
       const ev = {
         key: b.id + ':' + r.id,
-        title: '[' + pre + '] ' + (name || '客人') + (paid ? '（已結帳）' : ''),
+        title: '【美甲預約】' + (name || '客人') + '/' + studio,
         date: r.date,
         time: /^\d{1,2}:\d{2}$/.test(time || '') ? (time.length === 4 ? '0' + time : time) : '',
         desc: descOf_(r, store, paid)
@@ -106,7 +106,7 @@ function buildWanted(payload, fromYmd, toYmd) {
 }
 
 function descOf_(r, store, paid) {
-  const lines = ['店家：' + store];
+  const lines = ['店家：' + store, '狀態：' + (paid ? '已結帳' : '未結帳')];
   if (paid) {
     const bd = r.breakdown || {};
     const items = [];
