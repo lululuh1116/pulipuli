@@ -14,7 +14,7 @@ const CONFIG = {
   PAST_DAYS: 30,       // 同步範圍：過去幾天
   FUTURE_DAYS: 180,    // 同步範圍：未來幾天
   EVERY_MIN: 15,       // 多久同步一次，只能填 1、5、10、15、30
-  PREFIX: {'OUO FISH+': 'OUO', 'PuliPuli.Studio': 'PULI'}  // 標題前面的店名縮寫；沒列到的店用完整店名
+  PREFIX: {'ouo_fish.nail': 'OUO', 'Pulipuli.studio': 'PULI'}  // 標題前面的店名縮寫（照 App 裡的店名）；沒列到的店用完整店名
 };
 const TZ_OFFSET = '+08:00';
 const TAG = 'ppKey';
