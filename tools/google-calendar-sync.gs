@@ -113,12 +113,12 @@ function descOf_(r, store, paid) {
     if (bd.base && bd.base.name) items.push(bd.base.name);
     if (bd.removal && bd.removal.name) items.push(bd.removal.name);
     (bd.addons || []).forEach(a => a && a.name && items.push(a.name));
-    if (items.length) lines.push('項目：' + items.join('＋'));
+    if (items.length) lines.push('項目：' + items.join('+'));
     if (r.note) lines.push('備註：' + r.note);
   } else {
     if (r.channel) lines.push('管道：' + r.channel);
     const pl = r.plans || (r.plan ? [r.plan] : []);
-    if (pl.length) lines.push('項目：' + pl.map(p => p && p.name).filter(Boolean).join('＋'));
+    if (pl.length) lines.push('項目：' + pl.map(p => p && p.name).filter(Boolean).join('+'));
     if (r.planNote) lines.push('備註：' + r.planNote);
     if (r.deposit > 0) lines.push('訂金：$' + r.deposit);
   }
