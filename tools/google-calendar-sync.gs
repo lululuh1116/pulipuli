@@ -93,7 +93,7 @@ function buildWanted(payload, fromYmd, toYmd) {
       else return;
       const ev = {
         key: b.id + ':' + r.id,
-        title: '【美甲預約】' + (name || '客人') + '/' + studio,
+        title: '【美甲預約】' + (name || '客人') + '-' + studio,
         date: r.date,
         time: /^\d{1,2}:\d{2}$/.test(time || '') ? (time.length === 4 ? '0' + time : time) : '',
         desc: descOf_(r, store, paid)
